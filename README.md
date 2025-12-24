@@ -1,16 +1,55 @@
-# React + Vite
+# PaddleHubs (Phase 1) — Pickleball Club Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Founder:** Sai Sidharth Vinothkannan
+**Live:** https://paddlehubs.com
+**Auth Domain:** https://auth.paddlehubs.com
 
-Currently, two official plugins are available:
+Phase 1 delivers a production-ready React (Vite) web app hosted on AWS S3 + CloudFront with AWS Cognito login (OAuth2 Authorization Code + PKCE). Protected routes include Court Booking and Match Details.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## ✅ Features (Phase 1)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Cognito Hosted UI login/logout (OAuth2 + PKCE)
+- Protected routes:
+  - `/court-booking`
+  - `/match-details`
+- Responsive layout with sidebar + top bar
+- Singles + Doubles match entry UI (player names user-entered)
+- Court booking UI
+- Production hosting: S3 + CloudFront
 
-## Expanding the ESLint configuration
+> **Phase 1 data is local-only (browser storage).**
+> Persistence + per-user data linking is planned for Phase 2.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+---
+
+## Architecture (Phase 1)
+
+Browser → CloudFront → S3 (static site)
+Authentication: Browser ↔ Cognito Hosted UI → callback to app
+
+---
+
+## Repo Structure
+
+```txt
+paddlehubs-site/
+  ├─ src/
+  │  ├─ components/
+  │  │  ├─ Layout.jsx
+  │  │  └─ RequireAuth.jsx
+  │  ├─ lib/
+  │  │  └─ auth.js
+  │  ├─ pages/
+  │  │  ├─ Dashboard.jsx
+  │  │  ├─ CourtBooking.jsx
+  │  │  ├─ MatchDetails.jsx
+  │  │  └─ AuthCallback.jsx
+  │  ├─ App.jsx
+  │  ├─ main.jsx
+  │  └─ index.css
+  ├─ public/
+  ├─ package.json
+  ├─ vite.config.js
+  └─ README.md

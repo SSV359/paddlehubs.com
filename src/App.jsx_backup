@@ -1,0 +1,48 @@
+import React from "react";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+
+import Layout from "./components/Layout.jsx";
+import AuthCallback from "./pages/AuthCallback.jsx";
+
+import Dashboard from "./pages/Dashboard.jsx";
+import CourtBooking from "./pages/CourtBooking.jsx";
+import MatchDetails from "./pages/MatchDetails.jsx";
+
+import { isLoggedIn } from "./lib/auth.js";
+
+function RequireAuth({ children }) {
+  const location = useLocation();
+  if (!isLoggedIn()) return <Navigate to="/" replace state={{ from: location.pathname }} />;
+  return children;
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+
+        <Route
+          path="/court-booking"
+          element={
+            <RequireAuth>
+              <CourtBooking />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/match-details"
+          element={
+            <RequireAuth>
+              <MatchDetails />
+            </RequireAuth>
+          }
+        />
+
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+

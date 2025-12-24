@@ -185,10 +185,6 @@ export default function Layout() {
                 Court bookings • Match tracking • Club hub
               </div>
 
-              <div className="mt-3 pt-3 border-t border-white/10">
-                <div className="text-xs text-white/60 uppercase">Founder</div>
-                <div className="text-sm font-medium">Sai Sidharth Vinothkannan</div>
-              </div>
             </div>
           </div>
         </aside>

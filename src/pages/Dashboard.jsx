@@ -32,12 +32,6 @@ export default function Dashboard() {
         <Card title="Matches (local)" value={matches.length} icon={Trophy} />
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur p-6">
-        <div className="font-semibold">Next step</div>
-        <div className="text-sm text-white/70 mt-1">
-          If you want shared data + login for your whole community, we’ll connect an API + database.
-        </div>
-      </div>
     </div>
   );
 }

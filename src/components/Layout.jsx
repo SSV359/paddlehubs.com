@@ -1,3 +1,4 @@
+import logo from "../assets/paddlehubs-logo.png";
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { CalendarDays, Home, Menu, Swords, X } from "lucide-react";
@@ -148,6 +149,18 @@ export default function Layout() {
           </div>
         </div>
       )}
+
+	  <div className="flex items-center gap-3">
+  <img
+    src={logo}
+    alt="PaddleHubs"
+    className="h-10 w-10 rounded-xl"
+  />
+  <div className="leading-tight">
+    <div className="text-base font-semibold">PaddleHubs</div>
+    <div className="text-xs text-white/60">pickleball club portal</div>
+  </div>
+</div>
 
       {/* Desktop layout */}
       <div className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">

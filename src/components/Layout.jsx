@@ -59,13 +59,19 @@ export default function Layout() {
             <Menu size={18} />
           </button>
 
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-2xl bg-gradient-to-br from-cyan-400 to-fuchsia-500 shadow-lg" />
-            <div>
-              <div className="text-lg font-semibold">PaddleHubs</div>
-              <div className="text-xs text-white/70">pickleball club portal</div>
-            </div>
-          </div>
+
+ <div className="flex items-center gap-3">
+  <img
+    src={logo}
+    alt="PaddleHubs"
+    className="h-10 w-10 rounded-xl"
+  />
+  <div className="leading-tight">
+    <div className="text-base font-semibold">PaddleHubs</div>
+    <div className="text-xs text-white/60">pickleball club portal</div>
+  </div>
+</div>
+
 
           {/* Login / Logout */}
           <div className="ml-auto flex items-center gap-2">
@@ -151,29 +157,6 @@ export default function Layout() {
         </div>
       )}
 
-	  <div className="flex items-center gap-3">
-  <img
-    src={logo}
-    alt="PaddleHubs"
-    className="h-10 w-10 rounded-xl"
-  />
-  <div className="leading-tight">
-    <div className="text-base font-semibold">PaddleHubs</div>
-    <div className="text-xs text-white/60">pickleball club portal</div>
-  </div>
-</div>
-
-	  <div className="flex items-center gap-3">
-  <img
-    src={phLogo}
-    alt="PaddleHubs"
-    className="h-10 w-10 rounded-xl object-contain"
-  />
-  <div className="leading-tight">
-    <div className="text-base font-semibold">PaddleHubs</div>
-    <div className="text-xs text-white/60">pickleball club portal</div>
-  </div>
-</div>
 
 
       {/* Desktop layout */}

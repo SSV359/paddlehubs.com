@@ -1,29 +1,46 @@
-import logo from "../assets/paddlehubs-logo.png";
-import phLogo from "../assets/paddlehubs-logo.png"
 import React, { useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { CalendarDays, Home, Menu, Swords, X } from "lucide-react";
-import {
-  loginUrl,
-  logoutUrl,
-  isLoggedIn,
-  getUserEmail,
-  clearAuth,
-} from "../lib/auth.js";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { CalendarDays, Home, Menu, Swords, User, X } from "lucide-react";
+
+import logo from "../assets/paddlehubs-logo.png";
+import { loginUrl, logoutUrl, isLoggedIn, getUserEmail, getUserSub, clearAuth } from "../lib/auth.js";
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
+/** Phase 1: read displayName from localStorage profiles map */
+const KEY_PROFILES = "ph_profiles";
+function getDisplayName() {
+  try {
+    const sub = getUserSub();
+    const email = getUserEmail();
+    if (!sub) return email || "";
+
+    const all = JSON.parse(localStorage.getItem(KEY_PROFILES) || "{}");
+    const saved = all?.[sub]?.displayName;
+    if (saved && saved.trim()) return saved.trim();
+
+    // fallback: email prefix
+    return (email || "").split("@")[0] || email || "";
+  } catch {
+    return getUserEmail() || "";
+  }
+}
+
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const [loggedIn, setLoggedIn] = useState(isLoggedIn());
+  const [displayName, setDisplayName] = useState(getDisplayName());
 
   const location = useLocation();
-  const navigate = useNavigate();
 
   useEffect(() => {
-    const sync = () => setLoggedIn(isLoggedIn());
+    const sync = () => {
+      const li = isLoggedIn();
+      setLoggedIn(li);
+      setDisplayName(getDisplayName());
+    };
     window.addEventListener("focus", sync);
     window.addEventListener("storage", sync);
     sync();
@@ -42,6 +59,7 @@ export default function Layout() {
       { to: "/", label: "Dashboard", icon: Home, public: true },
       { to: "/court-booking", label: "Court Booking", icon: CalendarDays, public: false },
       { to: "/match-details", label: "Match Details", icon: Swords, public: false },
+      { to: "/profile", label: "My Profile", icon: User, public: false },
     ],
     []
   );
@@ -59,33 +77,28 @@ export default function Layout() {
             <Menu size={18} />
           </button>
 
-
- <div className="flex items-center gap-3">
-  <img
-    src={logo}
-    alt="PaddleHubs"
-    className="h-10 w-10 rounded-xl"
-  />
-  <div className="leading-tight">
-    <div className="text-base font-semibold">PaddleHubs</div>
-    <div className="text-xs text-white/60">pickleball club portal</div>
-  </div>
-</div>
-
+          {/* Brand */}
+          <div className="flex items-center gap-3">
+            <img src={logo} alt="PaddleHubs" className="h-10 w-10 rounded-xl object-contain" />
+            <div className="leading-tight">
+              <div className="text-base font-semibold">PaddleHubs</div>
+              <div className="text-xs text-white/60">pickleball club portal</div>
+            </div>
+          </div>
 
           {/* Login / Logout */}
           <div className="ml-auto flex items-center gap-2">
             {loggedIn ? (
               <>
                 <div className="hidden sm:block text-xs text-white/70">
-                  {getUserEmail() || "Signed in"}
+                  {displayName || getUserEmail() || "Signed in"}
                 </div>
 
-                {/* ✅ FIXED LOGOUT: button + correct /logout URL */}
                 <button
                   onClick={() => {
                     clearAuth();
                     setLoggedIn(false);
+                    setDisplayName("");
                     window.location.href = logoutUrl();
                   }}
                   className="rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2 text-sm"
@@ -136,9 +149,7 @@ export default function Layout() {
                       className={({ isActive }) =>
                         classNames(
                           "flex items-center gap-3 rounded-2xl px-3 py-3 border",
-                          isActive
-                            ? "bg-white/15 border-white/25"
-                            : "bg-white/5 border-white/10 hover:bg-white/10"
+                          isActive ? "bg-white/15 border-white/25" : "bg-white/5 border-white/10 hover:bg-white/10"
                         )
                       }
                     >
@@ -149,15 +160,10 @@ export default function Layout() {
                 })}
             </nav>
 
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="text-xs text-white/60 uppercase">Founder</div>
-              <div className="text-sm font-medium">Sai Sidharth Vinothkannan</div>
-            </div>
+            {/* Removed Founder block (per your request) */}
           </div>
         </div>
       )}
-
-
 
       {/* Desktop layout */}
       <div className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
@@ -191,10 +197,7 @@ export default function Layout() {
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-sm font-semibold">PaddleHubs</div>
-              <div className="text-xs text-white/70 mt-1">
-                Court bookings • Match tracking • Club hub
-              </div>
-
+              <div className="text-xs text-white/70 mt-1">Court bookings • Match tracking • Club hub</div>
             </div>
           </div>
         </aside>

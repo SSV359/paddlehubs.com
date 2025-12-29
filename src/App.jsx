@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import CourtBooking from "./pages/CourtBooking.jsx";
 import MatchDetails from "./pages/MatchDetails.jsx";
 import AuthCallback from "./pages/AuthCallback.jsx";
+import Profile from "./pages/Profile.jsx";
 
 export default function App() {
   return (
@@ -31,6 +32,14 @@ export default function App() {
           element={
             <RequireAuth>
               <MatchDetails />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <RequireAuth>
+              <Profile />
             </RequireAuth>
           }
         />

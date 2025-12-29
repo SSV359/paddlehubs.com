@@ -1,79 +1,50 @@
-const AUTH_KEY = "paddlehubs_auth";
-const PKCE_KEY = "paddlehubs_pkce_verifier";
+// /opt/paddlehubs-site/src/lib/auth.js
+// Phase 1: Cognito Hosted UI (PKCE) + basic session + JWT claim helpers
 
-/** ---------- helpers ---------- */
-function base64UrlEncodeBytes(bytes) {
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
+const AUTH_KEY = "ph_auth";
+const PKCE_KEY = "ph_pkce_verifier";
 
-async function sha256(plain) {
-  const data = new TextEncoder().encode(plain);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return base64UrlEncodeBytes(new Uint8Array(digest));
-}
-
-function randomVerifier() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return base64UrlEncodeBytes(bytes);
-}
-
-function decodeJwtPayload(token) {
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(b64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-/** ---------- storage ---------- */
-export function getAuth() {
-  try {
-    return JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
-  } catch {
-    return null;
-  }
-}
-
+/** ---------- Basic storage ---------- */
 export function setAuth(tokens) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(tokens));
+}
+
+export function getAuth() {
+  try {
+    return JSON.parse(localStorage.getItem(AUTH_KEY)) || null;
+  } catch {
+    return null;
+  }
 }
 
 export function clearAuth() {
   localStorage.removeItem(AUTH_KEY);
 }
 
-/** ---------- user + auth status ---------- */
 export function isLoggedIn() {
-  const auth = getAuth();
-  if (!auth?.id_token) return false;
-
-  const payload = decodeJwtPayload(auth.id_token);
-  if (!payload?.exp) return true;
-
-  const now = Math.floor(Date.now() / 1000);
-  return payload.exp > now;
+  const a = getAuth();
+  return !!(a?.access_token || a?.id_token);
 }
 
-export function getUserEmail() {
-  const auth = getAuth();
-  if (!auth?.id_token) return "";
-  const payload = decodeJwtPayload(auth.id_token);
-  return payload?.email || payload?.["cognito:username"] || "";
+/** ---------- PKCE helpers ---------- */
+function randomVerifier(length = 64) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  let out = "";
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  for (let i = 0; i < bytes.length; i++) out += chars[bytes[i] % chars.length];
+  return out;
 }
 
-/** ---------- Cognito URLs used by Layout ---------- */
+async function sha256(verifier) {
+  const enc = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", enc);
+  const bytes = Array.from(new Uint8Array(digest));
+  const base64 = btoa(String.fromCharCode(...bytes));
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** ---------- Login / Logout URLs ---------- */
 export async function loginUrl() {
   const domain = import.meta.env.VITE_COGNITO_DOMAIN;
   const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
@@ -106,7 +77,6 @@ export function logoutUrl() {
     logout_uri: logoutUri,
   });
 
-  // ✅ MUST be /logout (not /login)
   return `${domain}/logout?${params.toString()}`;
 }
 
@@ -138,5 +108,40 @@ export async function exchangeCodeForTokens(code) {
   setAuth(tokens);
   localStorage.removeItem(PKCE_KEY);
   return tokens;
+}
+
+/** ---------- JWT claim helpers (for Phase 1 user->player mapping) ---------- */
+function b64UrlToJson(b64url) {
+  const pad = "=".repeat((4 - (b64url.length % 4)) % 4);
+  const base64 = (b64url + pad).replace(/-/g, "+").replace(/_/g, "/");
+  const jsonStr = atob(base64);
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return JSON.parse(decodeURIComponent(escape(jsonStr)));
+  }
+}
+
+export function getUserClaims() {
+  const a = getAuth();
+  const token = a?.id_token || "";
+  if (!token || !token.includes(".")) return null;
+
+  try {
+    const payload = token.split(".")[1];
+    return b64UrlToJson(payload);
+  } catch {
+    return null;
+  }
+}
+
+export function getUserEmail() {
+  const c = getUserClaims();
+  return c?.email || "";
+}
+
+export function getUserSub() {
+  const c = getUserClaims();
+  return c?.sub || "";
 }
 

@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { isLoggedIn, getUserEmail, getUserSub } from "../lib/auth.js";
 
 /** ---------- helpers ---------- */
-const uid = () => crypto.randomUUID?.() || (Math.random().toString(16).slice(2) + Date.now().toString(16));
+const uid = () =>
+  crypto.randomUUID?.() || (Math.random().toString(16).slice(2) + Date.now().toString(16));
+
+const KEY_PROFILES = "ph_profiles";
 
 function read(key, fallback) {
   try {
@@ -17,13 +20,21 @@ function write(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function getSavedDisplayName(sub, email) {
+  try {
+    const all = JSON.parse(localStorage.getItem(KEY_PROFILES) || "{}");
+    const saved = all?.[sub]?.displayName;
+    if (saved && saved.trim()) return saved.trim();
+  } catch {}
+  return (email || "").split("@")[0] || "";
+}
+
 // Week starts Monday. Returns "YYYY-MM-DD" (Monday date) for a given YYYY-MM-DD.
 function weekKey(dateStr) {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "invalid-week";
 
-  // Convert JS day (Sun=0..Sat=6) to Mon=0..Sun=6
-  const day = (d.getDay() + 6) % 7;
+  const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
   const monday = new Date(d);
   monday.setDate(d.getDate() - day);
   monday.setHours(0, 0, 0, 0);
@@ -39,21 +50,14 @@ function bookingKeyForUser() {
   return sub ? `ph_bookings:${sub}` : `ph_bookings:guest`;
 }
 
-function defaultNameFromEmail(email) {
-  if (!email) return "";
-  return email.split("@")[0];
-}
-
 export default function CourtBooking() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  // Require login (Phase 1 rule)
   const loggedIn = isLoggedIn();
   const sub = getUserSub();
   const email = getUserEmail();
 
-  // per-user bookings storage
   const [bookings, setBookings] = useState(() => read(bookingKeyForUser(), []));
 
   const [form, setForm] = useState({
@@ -65,13 +69,12 @@ export default function CourtBooking() {
     players: "",
   });
 
-  // When user changes (login/logout), reload user-scoped bookings + default name
   useEffect(() => {
     const key = bookingKeyForUser();
     setBookings(read(key, []));
 
-    // map registered user -> player (Phase 1)
-    const fallback = defaultNameFromEmail(email);
+    // ✅ map registered user -> player displayName
+    const fallback = getSavedDisplayName(sub, email);
     setForm((f) => ({
       ...f,
       name: f.name?.trim() ? f.name : fallback, // only set if empty
@@ -83,7 +86,6 @@ export default function CourtBooking() {
     [bookings]
   );
 
-  // How many bookings this week for this user
   const currentWeekCount = useMemo(() => {
     if (!sub) return 0;
     const today = new Date();
@@ -152,12 +154,10 @@ export default function CourtBooking() {
   function del(id) {
     setError("");
     setInfo("");
-
     const next = bookings.filter((b) => b.id !== id);
     save(next);
   }
 
-  // Show only this user's bookings in the list (keeps UI clean)
   const myBookings = useMemo(() => {
     if (!sub) return [];
     return sorted.filter((b) => b.ownerSub === sub);
@@ -170,7 +170,7 @@ export default function CourtBooking() {
         <div className="text-sm text-white/70 mt-1">
           {loggedIn ? (
             <>
-              Logged in as <span className="font-semibold">{email || "user"}</span> • Weekly limit:{" "}
+              Logged in as <span className="font-semibold">{getSavedDisplayName(sub, email) || (email || "user")}</span> • Weekly limit:{" "}
               <span className="font-semibold">{currentWeekCount}/2</span>
             </>
           ) : (
@@ -199,7 +199,7 @@ export default function CourtBooking() {
               name="name"
               value={form.name}
               onChange={onChange}
-              placeholder="Your name (auto-filled from login)"
+              placeholder="Your name (from Profile)"
               disabled={!loggedIn}
             />
 

@@ -1,43 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { isLoggedIn, getUserEmail, getUserSub } from "../lib/auth.js";
+import { isLoggedIn, getUserEmail } from "../lib/auth.js";
+import { api } from "../lib/api.js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-
-const KEY_PROFILES = "ph_profiles";
-
-function uid() {
-  return crypto.randomUUID?.() || (Math.random().toString(16).slice(2) + Date.now().toString(16));
-}
 
 function trim(v) {
   return (v || "").trim();
 }
 
-function read(key, fallback) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return v ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function write(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function matchesKeyForUser() {
-  const sub = getUserSub();
-  return sub ? `ph_matches:${sub}` : `ph_matches:guest`;
-}
-
-function getSavedDisplayName(sub, email) {
-  try {
-    const all = JSON.parse(localStorage.getItem(KEY_PROFILES) || "{}");
-    const saved = all?.[sub]?.displayName;
-    if (saved && saved.trim()) return saved.trim();
-  } catch {}
-  return (email || "").split("@")[0] || "";
+function emailPrefix(email) {
+  return (email || "").split("@")[0] || email || "";
 }
 
 function calcWinner(labelA, labelB, scoreA, scoreB) {
@@ -98,10 +70,14 @@ function downloadBlob({ content, filename, mime }) {
 
 export default function MatchDetails() {
   const loggedIn = isLoggedIn();
-  const sub = getUserSub();
   const email = getUserEmail();
 
-  const [matches, setMatches] = useState(() => read(matchesKeyForUser(), []));
+  const [loading, setLoading] = useState(false);
+  const [me, setMe] = useState(null);
+  const [matches, setMatches] = useState([]);
+
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
 
   const [form, setForm] = useState({
     date: "",
@@ -120,75 +96,134 @@ export default function MatchDetails() {
     doublesT2P2: "",
   });
 
-  // Load per-user matches and auto-fill P1 from Profile displayName
-  useEffect(() => {
-    setMatches(read(matchesKeyForUser(), []));
+  const displayName = (me?.displayName || "").trim() || emailPrefix(email);
 
-    const p1 = getSavedDisplayName(sub, email);
+  async function loadAll() {
+    if (!loggedIn) {
+      setMe(null);
+      setMatches([]);
+      setForm((f) => ({
+        ...f,
+        singlesP1: "",
+        doublesT1P1: "",
+      }));
+      return;
+    }
 
-    setForm((f) => ({
-      ...f,
-      singlesP1: trim(f.singlesP1) ? f.singlesP1 : p1,
-      doublesT1P1: trim(f.doublesT1P1) ? f.doublesT1P1 : p1,
-    }));
-  }, [sub, email]);
+    setLoading(true);
+    setError("");
+    setInfo("");
 
-  const sorted = useMemo(() => {
-    return matches.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  }, [matches]);
+    try {
+      const m = await api.getMe(); // GET /me
+      setMe(m);
 
-  function save(next) {
-    setMatches(next);
-    write(matchesKeyForUser(), next);
+      const dn = (m?.displayName || "").trim() || emailPrefix(email);
+
+      // Pre-fill "you" fields if empty
+      setForm((f) => ({
+        ...f,
+        singlesP1: trim(f.singlesP1) ? f.singlesP1 : dn,
+        doublesT1P1: trim(f.doublesT1P1) ? f.doublesT1P1 : dn,
+      }));
+
+      const res = await api.listMatches(); // GET /matches => { items: [] }
+      setMatches(res?.items || []);
+    } catch (e) {
+      setError(String(e?.message || e));
+      setMe(null);
+      setMatches([]);
+    } finally {
+      setLoading(false);
+    }
   }
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn, email]);
 
   function onChange(e) {
     const { name, value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
   }
 
-  function addMatch(e) {
+  const sorted = useMemo(() => {
+    // same behavior as your old code: newest date first
+    return (matches || [])
+      .slice()
+      .sort((a, b) => (String(b.date || "")).localeCompare(String(a.date || "")));
+  }, [matches]);
+
+  async function addMatch(e) {
     e.preventDefault();
-    if (!loggedIn || !sub) return;
-    if (!form.date || !isValid(form)) return;
+    setError("");
+    setInfo("");
+
+    if (!loggedIn) {
+      setError("Please login to add matches.");
+      return;
+    }
+    if (!form.date || !isValid(form)) {
+      setError("Please fill date + player names.");
+      return;
+    }
 
     const { labelA, labelB, matchup } = buildMatchup(form);
     const winner = calcWinner(labelA, labelB, form.scoreA, form.scoreB);
 
-    const item = {
-      id: uid(),
-      ownerSub: sub,
-      ownerEmail: email || "",
-      date: form.date,
-      court: form.court,
-      gameType: form.gameType,
-      scoreA: Number(form.scoreA),
-      scoreB: Number(form.scoreB),
-      matchup,
-      winner,
-      notes: form.notes,
-      createdAt: new Date().toISOString(),
-    };
+    setLoading(true);
+    try {
+      // POST /matches
+      const created = await api.createMatch({
+        date: form.date,
+        court: form.court,
+        gameType: form.gameType,
+        matchup,
+        winner,
+        scoreA: Number(form.scoreA),
+        scoreB: Number(form.scoreB),
+        notes: String(form.notes || ""),
+      });
 
-    const next = [item, ...matches];
-    save(next);
+      // prepend in UI immediately
+      setMatches((prev) => [created, ...(prev || [])]);
+      setInfo("Match added ✅");
 
-    // keep Player 1 fields; clear rest
-    setForm((f) => ({
-      ...f,
-      scoreA: 11,
-      scoreB: 7,
-      notes: "",
-      singlesP2: "",
-      doublesT1P2: "",
-      doublesT2P1: "",
-      doublesT2P2: "",
-    }));
+      // keep "you" fields, clear the others like Phase 1
+      setForm((f) => ({
+        ...f,
+        scoreA: 11,
+        scoreB: 7,
+        notes: "",
+        singlesP2: "",
+        doublesT1P2: "",
+        doublesT2P1: "",
+        doublesT2P2: "",
+      }));
+    } catch (e2) {
+      setError(String(e2?.message || e2));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function remove(id) {
-    const next = matches.filter((m) => m.id !== id);
-    save(next);
+  async function remove(id) {
+    setError("");
+    setInfo("");
+
+    if (!loggedIn) return;
+
+    setLoading(true);
+    try {
+      await api.deleteMatch(id); // DELETE /matches/{id}
+      setMatches((prev) => (prev || []).filter((m) => m.id !== id));
+      setInfo("Deleted ✅");
+    } catch (e) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
   }
 
   // ---------- EXPORTS ----------
@@ -269,24 +304,51 @@ export default function MatchDetails() {
         <div className="text-2xl font-semibold">Match Details</div>
         <div className="text-sm text-white/70 mt-1">
           {loggedIn ? (
-            <>Logged in as <span className="font-semibold">{getSavedDisplayName(sub, email) || (email || "user")}</span> • Matches saved for this user</>
+            <>
+              Logged in as <span className="font-semibold">{displayName || (email || "user")}</span>{" "}
+              • Saved in shared club database
+            </>
           ) : (
             "Please login to add matches."
           )}
         </div>
       </div>
 
+      {error && (
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {info}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Form */}
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-          <form onSubmit={addMatch} className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-semibold">New match</div>
+            <button
+              type="button"
+              onClick={loadAll}
+              className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+              disabled={!loggedIn || loading}
+              title="Refresh"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <form onSubmit={addMatch} className="mt-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input
                 type="date"
                 name="date"
                 value={form.date}
                 onChange={onChange}
-                disabled={!loggedIn}
+                disabled={!loggedIn || loading}
                 className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
               />
 
@@ -294,7 +356,7 @@ export default function MatchDetails() {
                 name="court"
                 value={form.court}
                 onChange={onChange}
-                disabled={!loggedIn}
+                disabled={!loggedIn || loading}
                 className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
               >
                 <option>Court 1</option>
@@ -307,7 +369,7 @@ export default function MatchDetails() {
                 name="gameType"
                 value={form.gameType}
                 onChange={onChange}
-                disabled={!loggedIn}
+                disabled={!loggedIn || loading}
                 className="sm:col-span-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
               >
                 <option value="singles">Singles</option>
@@ -315,6 +377,7 @@ export default function MatchDetails() {
               </select>
             </div>
 
+            {/* Player inputs */}
             {form.gameType === "singles" ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
@@ -322,7 +385,7 @@ export default function MatchDetails() {
                   value={form.singlesP1}
                   onChange={onChange}
                   placeholder="Player 1 (you)"
-                  disabled={!loggedIn}
+                  disabled={!loggedIn || loading}
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
                 />
                 <input
@@ -330,7 +393,7 @@ export default function MatchDetails() {
                   value={form.singlesP2}
                   onChange={onChange}
                   placeholder="Player 2"
-                  disabled={!loggedIn}
+                  disabled={!loggedIn || loading}
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
                 />
               </div>
@@ -341,7 +404,7 @@ export default function MatchDetails() {
                   value={form.doublesT1P1}
                   onChange={onChange}
                   placeholder="Team 1 - Player 1 (you)"
-                  disabled={!loggedIn}
+                  disabled={!loggedIn || loading}
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
                 />
                 <input
@@ -349,7 +412,7 @@ export default function MatchDetails() {
                   value={form.doublesT1P2}
                   onChange={onChange}
                   placeholder="Team 1 - Player 2"
-                  disabled={!loggedIn}
+                  disabled={!loggedIn || loading}
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
                 />
                 <input
@@ -357,7 +420,7 @@ export default function MatchDetails() {
                   value={form.doublesT2P1}
                   onChange={onChange}
                   placeholder="Team 2 - Player 1"
-                  disabled={!loggedIn}
+                  disabled={!loggedIn || loading}
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
                 />
                 <input
@@ -365,7 +428,7 @@ export default function MatchDetails() {
                   value={form.doublesT2P2}
                   onChange={onChange}
                   placeholder="Team 2 - Player 2"
-                  disabled={!loggedIn}
+                  disabled={!loggedIn || loading}
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
                 />
               </div>
@@ -381,7 +444,7 @@ export default function MatchDetails() {
                 name="scoreA"
                 value={form.scoreA}
                 onChange={onChange}
-                disabled={!loggedIn}
+                disabled={!loggedIn || loading}
                 className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
               />
               <input
@@ -389,7 +452,7 @@ export default function MatchDetails() {
                 name="scoreB"
                 value={form.scoreB}
                 onChange={onChange}
-                disabled={!loggedIn}
+                disabled={!loggedIn || loading}
                 className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
               />
             </div>
@@ -400,15 +463,15 @@ export default function MatchDetails() {
               onChange={onChange}
               rows="3"
               placeholder="Notes (optional)"
-              disabled={!loggedIn}
+              disabled={!loggedIn || loading}
               className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
             />
 
             <button
               className="w-full rounded-2xl bg-white/10 hover:bg-white/20 py-2 font-semibold disabled:opacity-40"
-              disabled={!loggedIn || !form.date || !isValid(form)}
+              disabled={!loggedIn || loading || !form.date || !isValid(form)}
             >
-              Add Match
+              {loading ? "Saving..." : "Add Match"}
             </button>
           </form>
         </div>
@@ -421,15 +484,17 @@ export default function MatchDetails() {
             <div className="flex items-center gap-2">
               <button
                 onClick={exportCSV}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs"
+                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={sorted.length === 0}
+                title={sorted.length === 0 ? "No matches to export" : "Export CSV"}
               >
                 Export CSV
               </button>
               <button
                 onClick={exportPDF}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs"
+                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={sorted.length === 0}
+                title={sorted.length === 0 ? "No matches to export" : "Export PDF"}
               >
                 Export PDF
               </button>
@@ -439,7 +504,9 @@ export default function MatchDetails() {
           <div className="mt-3 text-xs text-white/60">{sorted.length} total</div>
 
           <div className="mt-4">
-            {sorted.length === 0 ? (
+            {!loggedIn ? (
+              <div className="text-sm text-white/60">Login to view your matches.</div>
+            ) : sorted.length === 0 ? (
               <div className="text-sm text-white/60">No matches yet</div>
             ) : (
               sorted.map((m) => (
@@ -451,8 +518,15 @@ export default function MatchDetails() {
                   <div className="text-xs text-white/60">
                     Score: {m.scoreA} - {m.scoreB} • Winner: {m.winner}
                   </div>
-                  {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
-                  <button onClick={() => remove(m.id)} className="mt-2 text-xs underline text-white/70">
+                  {m.notes ? (
+                    <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div>
+                  ) : null}
+
+                  <button
+                    onClick={() => remove(m.id)}
+                    className="mt-2 text-xs underline text-white/70 disabled:opacity-40"
+                    disabled={loading}
+                  >
                     Delete
                   </button>
                 </div>

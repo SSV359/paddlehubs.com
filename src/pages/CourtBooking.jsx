@@ -2,20 +2,24 @@ import React, { useEffect, useMemo, useState } from "react";
 import { isLoggedIn, getUserEmail } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 
-/** Monday week key (YYYY-MM-DD of Monday) for client display */
-function weekKey(dateStr) {
+/**
+ * ✅ Match Lambda logic (UTC)
+ * Lambda mondayOfWeek():
+ *  - uses getUTCDay()
+ *  - uses UTC midnight
+ * Returns YYYY-MM-DD of Monday (UTC week start)
+ */
+function weekKeyUTC(dateStr) {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "invalid-week";
 
-  // convert JS day: Sun=0..Sat=6 => Mon=0..Sun=6
-  const day = (d.getDay() + 6) % 7;
-  const monday = new Date(d);
-  monday.setDate(d.getDate() - day);
-  monday.setHours(0, 0, 0, 0);
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - day);
 
-  const y = monday.getFullYear();
-  const m = String(monday.getMonth() + 1).padStart(2, "0");
-  const dd = String(monday.getDate()).padStart(2, "0");
+  const y = monday.getUTCFullYear();
+  const m = String(monday.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(monday.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
 
@@ -44,6 +48,7 @@ export default function CourtBooking() {
   });
 
   async function loadAll() {
+    // if not logged in, reset UI
     if (!loggedIn) {
       setMe(null);
       setBookings([]);
@@ -65,7 +70,10 @@ export default function CourtBooking() {
       const res = await api.listBookings(); // GET /bookings => { items: [] }
       setBookings(res?.items || []);
     } catch (e) {
+      // if token expired, api.js clears auth and throws -> show message
       setError(String(e?.message || e));
+      setMe(null);
+      setBookings([]);
     } finally {
       setLoading(false);
     }
@@ -73,8 +81,9 @@ export default function CourtBooking() {
 
   useEffect(() => {
     loadAll();
+    // reload when email changes too (different cognito user)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedIn]);
+  }, [loggedIn, email]);
 
   function onChange(e) {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
@@ -83,15 +92,18 @@ export default function CourtBooking() {
   const sorted = useMemo(() => {
     return (bookings || [])
       .slice()
-      .sort((a, b) => (String(a.date) + String(a.time)).localeCompare(String(b.date) + String(b.time)));
+      .sort((a, b) =>
+        (String(a.date) + String(a.time)).localeCompare(String(b.date) + String(b.time))
+      );
   }, [bookings]);
 
   const currentWeekCount = useMemo(() => {
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const wk = weekKey(`${yyyy}-${mm}-${dd}`);
+    // count *this week's* bookings (UTC-week, same as backend)
+    const now = new Date();
+    const y = now.getUTCFullYear();
+    const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(now.getUTCDate()).padStart(2, "0");
+    const wk = weekKeyUTC(`${y}-${m}-${d}`);
 
     return (bookings || []).filter((b) => b.weekKey === wk).length;
   }, [bookings]);
@@ -113,7 +125,6 @@ export default function CourtBooking() {
 
     setLoading(true);
     try {
-      // POST /bookings
       const created = await api.createBooking({
         date: form.date,
         time: form.time,
@@ -122,15 +133,12 @@ export default function CourtBooking() {
         players: String(form.players || "").trim(),
       });
 
-      // Add to list immediately (API returns the created item)
       setBookings((prev) => [created, ...(prev || [])]);
 
       setInfo("Booking added ✅");
       setForm((f) => ({ ...f, date: "", time: "", players: "" }));
     } catch (e2) {
-      // Backend returns 400 with JSON like { error: "Weekly limit..." }
-      const msg = String(e2?.message || e2);
-      setError(msg);
+      setError(String(e2?.message || e2));
     } finally {
       setLoading(false);
     }
@@ -144,7 +152,7 @@ export default function CourtBooking() {
 
     setLoading(true);
     try {
-      await api.deleteBooking(id); // DELETE /bookings/{id}
+      await api.deleteBooking(id);
       setBookings((prev) => (prev || []).filter((b) => b.id !== id));
       setInfo("Deleted ✅");
     } catch (e) {
@@ -154,6 +162,8 @@ export default function CourtBooking() {
     }
   }
 
+  const displayName = (me?.displayName || "").trim() || emailPrefix(email);
+
   return (
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-white/5 to-cyan-500/15 p-6">
@@ -161,11 +171,8 @@ export default function CourtBooking() {
         <div className="text-sm text-white/70 mt-1">
           {loggedIn ? (
             <>
-              Logged in as{" "}
-              <span className="font-semibold">
-                {(me?.displayName || "").trim() || emailPrefix(email)}
-              </span>{" "}
-              • Weekly usage: <span className="font-semibold">{currentWeekCount}/2</span>
+              Logged in as <span className="font-semibold">{displayName}</span> • Weekly usage:{" "}
+              <span className="font-semibold">{currentWeekCount}/2</span>
             </>
           ) : (
             "Please login to add bookings."
@@ -300,7 +307,7 @@ export default function CourtBooking() {
                         {b.date} • {b.time} • {b.duration} mins
                       </div>
                       <div className="text-xs text-white/60">
-                        {b.ownerDisplayName || form.name || "—"} • {b.players || "—"}
+                        {b.ownerDisplayName || displayName || "—"} • {b.players || "—"}
                       </div>
                     </div>
 

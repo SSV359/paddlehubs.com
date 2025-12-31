@@ -1,20 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { isLoggedIn, getUserEmail, getUserSub } from "../lib/auth.js";
-
-const KEY_PROFILES = "ph_profiles";
-
-function read(key, fallback) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return v ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function write(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
+import { isLoggedIn, getUserEmail } from "../lib/auth.js";
+import { api } from "../lib/api.js";
 
 function emailPrefix(email) {
   return (email || "").split("@")[0] || "";
@@ -22,63 +8,59 @@ function emailPrefix(email) {
 
 export default function Profile() {
   const loggedIn = isLoggedIn();
-  const sub = getUserSub();
   const email = getUserEmail();
 
   const [displayName, setDisplayName] = useState("");
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
 
   useEffect(() => {
-    setMsg("");
-    if (!loggedIn || !sub) return;
+    let alive = true;
+    async function load() {
+      setMsg("");
+      setErr("");
+      if (!loggedIn) return;
 
-    const all = read(KEY_PROFILES, {});
-    const existing = all[sub];
+      try {
+        const me = await api.getMe();
+        if (!alive) return;
 
-    if (existing?.displayName) {
-      setDisplayName(existing.displayName);
-    } else {
-      setDisplayName(emailPrefix(email));
+        const fallback = emailPrefix(email);
+        setDisplayName((me.displayName || "").trim() || fallback);
+      } catch (e) {
+        if (!alive) return;
+        setErr(e.message || "Failed to load profile");
+      }
     }
-  }, [loggedIn, sub, email]);
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [loggedIn, email]);
 
-  function save(e) {
+  async function save(e) {
     e.preventDefault();
     setMsg("");
-
-    if (!loggedIn || !sub) {
-      setMsg("Please login to update profile.");
-      return;
-    }
+    setErr("");
 
     const name = (displayName || "").trim();
     if (!name) {
-      setMsg("Display name cannot be empty.");
+      setErr("Display name cannot be empty.");
       return;
     }
 
-    const all = read(KEY_PROFILES, {});
-    const prev = all[sub] || {
-      playerId: sub,
-      email: email || "",
-      createdAt: new Date().toISOString(),
-    };
-
-    all[sub] = {
-      ...prev,
-      playerId: sub,
-      email: email || "",
-      displayName: name,
-      updatedAt: new Date().toISOString(),
-    };
-
-    write(KEY_PROFILES, all);
-    setMsg("Saved ✅");
+    try {
+      await api.putMe({ displayName: name });
+      setMsg("Saved ✅");
+    } catch (e2) {
+      setErr(e2.message || "Save failed");
+    }
   }
 
   function resetToDefault() {
     setDisplayName(emailPrefix(email));
-    setMsg("Reset to default (email prefix). Click Save to apply.");
+    setMsg("Reset to default. Click Save to apply.");
+    setErr("");
   }
 
   return (
@@ -86,9 +68,20 @@ export default function Profile() {
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-sky-500/15 via-white/5 to-indigo-500/15 p-6">
         <div className="text-2xl font-semibold">My Profile</div>
         <div className="text-sm text-white/70 mt-1">
-          Set your player display name (Phase 1 — saved in this browser)
+          Set your player display name (Phase II — saved in DynamoDB)
         </div>
       </div>
+
+      {err && (
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {err}
+        </div>
+      )}
+      {msg && (
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {msg}
+        </div>
+      )}
 
       <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
         {!loggedIn ? (
@@ -109,7 +102,7 @@ export default function Profile() {
                   placeholder="e.g., Sai Sidharth"
                 />
                 <div className="mt-2 text-xs text-white/50">
-                  This name will auto-fill Player 1 in matches + bookings.
+                  This will be used as the “player” name for bookings/matches.
                 </div>
               </div>
 
@@ -126,8 +119,6 @@ export default function Profile() {
                   Reset
                 </button>
               </div>
-
-              {msg && <div className="text-sm text-white/80">{msg}</div>}
             </form>
           </>
         )}

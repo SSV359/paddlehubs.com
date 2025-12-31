@@ -3,51 +3,63 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { CalendarDays, Home, Menu, Swords, User, X } from "lucide-react";
 
 import logo from "../assets/paddlehubs-logo.png";
-import { loginUrl, logoutUrl, isLoggedIn, getUserEmail, getUserSub, clearAuth } from "../lib/auth.js";
+import { loginUrl, logoutUrl, isLoggedIn, getUserEmail, clearAuth } from "../lib/auth.js";
+import { api } from "../lib/api.js";
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
-/** Phase 1: read displayName from localStorage profiles map */
-const KEY_PROFILES = "ph_profiles";
-function getDisplayName() {
-  try {
-    const sub = getUserSub();
-    const email = getUserEmail();
-    if (!sub) return email || "";
-
-    const all = JSON.parse(localStorage.getItem(KEY_PROFILES) || "{}");
-    const saved = all?.[sub]?.displayName;
-    if (saved && saved.trim()) return saved.trim();
-
-    // fallback: email prefix
-    return (email || "").split("@")[0] || email || "";
-  } catch {
-    return getUserEmail() || "";
-  }
+function emailPrefix(email) {
+  return (email || "").split("@")[0] || email || "";
 }
 
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const [loggedIn, setLoggedIn] = useState(isLoggedIn());
-  const [displayName, setDisplayName] = useState(getDisplayName());
+  const [displayName, setDisplayName] = useState("");
 
   const location = useLocation();
 
+  // Load display name from backend (/me). Fallback to email prefix.
+  async function refreshMe() {
+    const li = isLoggedIn();
+    setLoggedIn(li);
+
+    if (!li) {
+      setDisplayName("");
+      return;
+    }
+
+    const email = getUserEmail();
+    const fallback = emailPrefix(email);
+
+    // show fallback immediately while backend fetch happens
+    setDisplayName((prev) => prev || fallback);
+
+    try {
+      const me = await api.getMe(); // GET /me
+      const dn = (me?.displayName || "").trim();
+      setDisplayName(dn || fallback);
+    } catch {
+      // If API fails, still show something sane
+      setDisplayName(fallback);
+    }
+  }
+
   useEffect(() => {
-    const sync = () => {
-      const li = isLoggedIn();
-      setLoggedIn(li);
-      setDisplayName(getDisplayName());
-    };
+    const sync = () => refreshMe();
+
     window.addEventListener("focus", sync);
     window.addEventListener("storage", sync);
-    sync();
+
+    refreshMe();
+
     return () => {
       window.removeEventListener("focus", sync);
       window.removeEventListener("storage", sync);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -149,7 +161,9 @@ export default function Layout() {
                       className={({ isActive }) =>
                         classNames(
                           "flex items-center gap-3 rounded-2xl px-3 py-3 border",
-                          isActive ? "bg-white/15 border-white/25" : "bg-white/5 border-white/10 hover:bg-white/10"
+                          isActive
+                            ? "bg-white/15 border-white/25"
+                            : "bg-white/5 border-white/10 hover:bg-white/10"
                         )
                       }
                     >
@@ -160,7 +174,7 @@ export default function Layout() {
                 })}
             </nav>
 
-            {/* Removed Founder block (per your request) */}
+            {/* Founder block removed */}
           </div>
         </div>
       )}
@@ -197,7 +211,9 @@ export default function Layout() {
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-sm font-semibold">PaddleHubs</div>
-              <div className="text-xs text-white/70 mt-1">Court bookings • Match tracking • Club hub</div>
+              <div className="text-xs text-white/70 mt-1">
+                Court bookings • Match tracking • Club hub
+              </div>
             </div>
           </div>
         </aside>

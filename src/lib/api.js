@@ -1,186 +1,106 @@
 // /opt/paddlehubs-site/src/lib/api.js
-import { getUserEmail, getUserSub, isLoggedIn } from "./auth.js";
+import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
 
-const KEY_MATCHES = "ph_matches";
-const KEY_BOOKINGS = "ph_bookings";
-const KEY_PROFILES = "ph_profiles"; // map of sub -> profile
+const API_BASE_RAW = import.meta.env.VITE_API_BASE;
 
-function read(key, fallback) {
-  try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return v ?? fallback;
-  } catch {
-    return fallback;
-  }
+/**
+ * Normalize base so it never ends with "/" and never double-adds "/prod".
+ * Recommended .env:
+ *   VITE_API_BASE=https://kkz5s0g014.execute-api.us-east-1.amazonaws.com/prod
+ */
+function normalizeBase(base) {
+  if (!base) return "";
+  return base.replace(/\/+$/, "");
 }
 
-function write(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+const API_BASE = normalizeBase(API_BASE_RAW);
+
+function authHeader() {
+  const a = getAuth();
+  // For API Gateway JWT authorizer, ACCESS TOKEN is best
+  const token = a?.access_token || a?.id_token || "";
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function normalizeArray(v) {
-  if (Array.isArray(v)) return v;
-  if (typeof v === "string") return v ? [v] : [];
-  return [];
-}
+async function req(path, { method = "GET", body } = {}) {
+  if (!API_BASE) throw new Error("Missing VITE_API_BASE in .env");
 
-// Week key (Monday-start) => "YYYY-MM-DD" of Monday
-function weekKey(dateStr) {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "invalid-week";
-
-  const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
-  const monday = new Date(d);
-  monday.setDate(d.getDate() - day);
-  monday.setHours(0, 0, 0, 0);
-
-  const y = monday.getFullYear();
-  const m = String(monday.getMonth() + 1).padStart(2, "0");
-  const dd = String(monday.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
-
-function requireUser() {
+  // client-side enforcement for protected endpoints
   if (!isLoggedIn()) throw new Error("Not logged in");
-  const sub = getUserSub();
-  const email = getUserEmail();
-  if (!sub) throw new Error("Missing user sub (id_token claims).");
-  return { sub, email };
+
+  const url = `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  const headers = { ...authHeader() };
+
+  // only set JSON headers when sending a body
+  let payload;
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: payload,
+  });
+
+  const text = await res.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+
+  // handle auth failures nicely
+  if (res.status === 401 || res.status === 403) {
+    // token expired / invalid -> clear local auth
+    clearAuth();
+    const msg =
+      data?.error ||
+      data?.message ||
+      "Unauthorized. Please login again (token expired).";
+    throw new Error(msg);
+  }
+
+  if (!res.ok) {
+    const msg = data?.error || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return data;
 }
 
 export const api = {
-  // ---------------- PROFILE (mapped user -> player) ----------------
-  async getMyProfile() {
-    const { sub, email } = requireUser();
-    const all = read(KEY_PROFILES, {});
-    const existing = all[sub];
-
-    if (existing) return existing;
-
-    // auto-create minimal profile
-    const profile = {
-      playerId: sub,
-      email,
-      displayName: "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    all[sub] = profile;
-    write(KEY_PROFILES, all);
-    return profile;
+  // -------- Profile --------
+  getMe() {
+    return req("/me");
+  },
+  putMe(payload) {
+    return req("/me", { method: "PUT", body: payload });
   },
 
-  async saveMyProfile(patch) {
-    const { sub, email } = requireUser();
-    const all = read(KEY_PROFILES, {});
-    const prev = all[sub] || {
-      playerId: sub,
-      email,
-      displayName: "",
-      createdAt: new Date().toISOString(),
-    };
-
-    const next = {
-      ...prev,
-      ...patch,
-      playerId: sub,
-      email,
-      updatedAt: new Date().toISOString(),
-    };
-
-    all[sub] = next;
-    write(KEY_PROFILES, all);
-    return next;
+  // -------- Bookings --------
+  listBookings() {
+    return req("/bookings");
+  },
+  createBooking(payload) {
+    return req("/bookings", { method: "POST", body: payload });
+  },
+  deleteBooking(id) {
+    return req(`/bookings/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // ---------------- MATCHES (local) ----------------
-  async listMatches() {
-    const items = read(KEY_MATCHES, []);
-    return {
-      items: items.map((m) => ({
-        ...m,
-        players: normalizeArray(m.players),
-        scores: normalizeArray(m.scores),
-      })),
-    };
+  // -------- Matches --------
+  listMatches() {
+    return req("/matches");
   },
-
-  async createMatch(match) {
-    requireUser(); // enforce login for Phase 1
-
-    const items = read(KEY_MATCHES, []);
-
-    const newMatch = {
-      matchId: crypto.randomUUID(),
-      gameType: match.gameType,
-      matchDate: match.matchDate,
-      players: normalizeArray(match.players),
-      scores: normalizeArray(match.scores),
-      notes: match.notes || "",
-      createdAt: new Date().toISOString(),
-    };
-
-    items.unshift(newMatch);
-    write(KEY_MATCHES, items);
-    return newMatch;
+  createMatch(payload) {
+    return req("/matches", { method: "POST", body: payload });
   },
-
-  async deleteMatch(matchId) {
-    const items = read(KEY_MATCHES, []);
-    write(
-      KEY_MATCHES,
-      items.filter((m) => m.matchId !== matchId)
-    );
-  },
-
-  // ---------------- BOOKINGS (enforce 2/week/user) ----------------
-  async listBookings() {
-    const items = read(KEY_BOOKINGS, []);
-    return { items };
-  },
-
-  async createBooking(booking) {
-    const { sub, email } = requireUser();
-    const items = read(KEY_BOOKINGS, []);
-
-    const wk = weekKey(booking.date);
-    const mineThisWeek = items.filter(
-      (b) => b.ownerSub === sub && b.weekKey === wk
-    );
-
-    if (mineThisWeek.length >= 2) {
-      throw new Error("Weekly limit reached: only 2 court bookings per week.");
-    }
-
-    const newBooking = {
-      bookingId: crypto.randomUUID(),
-      ownerSub: sub,
-      ownerEmail: email,
-      weekKey: wk,
-
-      // booking fields
-      court: booking.court,
-      date: booking.date, // YYYY-MM-DD
-      timeSlot: booking.timeSlot,
-      notes: booking.notes || "",
-
-      createdAt: new Date().toISOString(),
-    };
-
-    items.unshift(newBooking);
-    write(KEY_BOOKINGS, items);
-    return newBooking;
-  },
-
-  async deleteBooking(bookingId) {
-    const { sub } = requireUser();
-    const items = read(KEY_BOOKINGS, []);
-    // only allow deleting your own
-    write(
-      KEY_BOOKINGS,
-      items.filter((b) => !(b.bookingId === bookingId && b.ownerSub === sub))
-    );
+  deleteMatch(id) {
+    return req(`/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 };
 

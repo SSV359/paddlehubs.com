@@ -18,7 +18,7 @@ const API_BASE = normalizeBase(API_BASE_RAW);
 function authHeader() {
   const a = getAuth();
   // For API Gateway JWT authorizer, ACCESS TOKEN is best
-  const token = a?.access_token || a?.id_token || "";
+  const token = a?.access_token || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { isLoggedIn, getUserEmail } from "../lib/auth.js";
+import { isLoggedIn, getUserEmail, getUserSub } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -9,7 +9,7 @@ function trim(v) {
 }
 
 function emailPrefix(email) {
-  return (email || "").split("@")[0] || email || "";
+  return (email || "").split("@")[0] || "";
 }
 
 function calcWinner(labelA, labelB, scoreA, scoreB) {
@@ -24,7 +24,9 @@ function buildMatchup(form) {
   if (form.gameType === "singles") {
     const p1 = trim(form.singlesP1);
     const p2 = trim(form.singlesP2);
-    return { labelA: p1, labelB: p2, matchup: `${p1} vs ${p2}` };
+    const labelA = p1;
+    const labelB = p2;
+    return { labelA, labelB, matchup: `${p1} vs ${p2}` };
   }
 
   const a1 = trim(form.doublesT1P1);
@@ -70,6 +72,7 @@ function downloadBlob({ content, filename, mime }) {
 
 export default function MatchDetails() {
   const loggedIn = isLoggedIn();
+  const sub = getUserSub();
   const email = getUserEmail();
 
   const [loading, setLoading] = useState(false);
@@ -96,17 +99,12 @@ export default function MatchDetails() {
     doublesT2P2: "",
   });
 
-  const displayName = (me?.displayName || "").trim() || emailPrefix(email);
-
   async function loadAll() {
     if (!loggedIn) {
       setMe(null);
       setMatches([]);
-      setForm((f) => ({
-        ...f,
-        singlesP1: "",
-        doublesT1P1: "",
-      }));
+      setError("");
+      setInfo("");
       return;
     }
 
@@ -115,24 +113,21 @@ export default function MatchDetails() {
     setInfo("");
 
     try {
-      const m = await api.getMe(); // GET /me
+      const m = await api.getMe();
       setMe(m);
 
-      const dn = (m?.displayName || "").trim() || emailPrefix(email);
+      const p1 = (m?.displayName || "").trim() || emailPrefix(email);
 
-      // Pre-fill "you" fields if empty
       setForm((f) => ({
         ...f,
-        singlesP1: trim(f.singlesP1) ? f.singlesP1 : dn,
-        doublesT1P1: trim(f.doublesT1P1) ? f.doublesT1P1 : dn,
+        singlesP1: trim(f.singlesP1) ? f.singlesP1 : p1,
+        doublesT1P1: trim(f.doublesT1P1) ? f.doublesT1P1 : p1,
       }));
 
-      const res = await api.listMatches(); // GET /matches => { items: [] }
+      const res = await api.listMatches(); // { items: [] }
       setMatches(res?.items || []);
     } catch (e) {
       setError(String(e?.message || e));
-      setMe(null);
-      setMatches([]);
     } finally {
       setLoading(false);
     }
@@ -141,31 +136,30 @@ export default function MatchDetails() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedIn, email]);
+  }, [loggedIn, sub]);
+
+  const sorted = useMemo(() => {
+    return (matches || [])
+      .slice()
+      .sort((a, b) => (String(b.date || "") + String(b.createdAt || "")).localeCompare(String(a.date || "") + String(a.createdAt || "")));
+  }, [matches]);
 
   function onChange(e) {
     const { name, value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
   }
 
-  const sorted = useMemo(() => {
-    // same behavior as your old code: newest date first
-    return (matches || [])
-      .slice()
-      .sort((a, b) => (String(b.date || "")).localeCompare(String(a.date || "")));
-  }, [matches]);
-
   async function addMatch(e) {
     e.preventDefault();
     setError("");
     setInfo("");
 
-    if (!loggedIn) {
+    if (!loggedIn || !sub) {
       setError("Please login to add matches.");
       return;
     }
     if (!form.date || !isValid(form)) {
-      setError("Please fill date + player names.");
+      setError("Please set a date and enter all player names.");
       return;
     }
 
@@ -174,7 +168,6 @@ export default function MatchDetails() {
 
     setLoading(true);
     try {
-      // POST /matches
       const created = await api.createMatch({
         date: form.date,
         court: form.court,
@@ -186,11 +179,11 @@ export default function MatchDetails() {
         notes: String(form.notes || ""),
       });
 
-      // prepend in UI immediately
       setMatches((prev) => [created, ...(prev || [])]);
+
       setInfo("Match added ✅");
 
-      // keep "you" fields, clear the others like Phase 1
+      // keep Player 1 fields; clear rest
       setForm((f) => ({
         ...f,
         scoreA: 11,
@@ -211,12 +204,11 @@ export default function MatchDetails() {
   async function remove(id) {
     setError("");
     setInfo("");
-
     if (!loggedIn) return;
 
     setLoading(true);
     try {
-      await api.deleteMatch(id); // DELETE /matches/{id}
+      await api.deleteMatch(id);
       setMatches((prev) => (prev || []).filter((m) => m.id !== id));
       setInfo("Deleted ✅");
     } catch (e) {
@@ -296,6 +288,7 @@ export default function MatchDetails() {
     doc.save("paddlehubs_match_history.pdf");
   }
 
+  const display = (me?.displayName || "").trim() || emailPrefix(email);
   const preview = isValid(form) ? buildMatchup(form).matchup : "Enter player names";
 
   return (
@@ -305,8 +298,7 @@ export default function MatchDetails() {
         <div className="text-sm text-white/70 mt-1">
           {loggedIn ? (
             <>
-              Logged in as <span className="font-semibold">{displayName || (email || "user")}</span>{" "}
-              • Saved in shared club database
+              Logged in as <span className="font-semibold">{display || email || "user"}</span> • Matches saved in the shared club database
             </>
           ) : (
             "Please login to add matches."
@@ -329,13 +321,12 @@ export default function MatchDetails() {
         {/* Form */}
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
-            <div className="font-semibold">New match</div>
+            <div className="font-semibold">New Match</div>
             <button
               type="button"
               onClick={loadAll}
               className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
               disabled={!loggedIn || loading}
-              title="Refresh"
             >
               Refresh
             </button>
@@ -377,7 +368,6 @@ export default function MatchDetails() {
               </select>
             </div>
 
-            {/* Player inputs */}
             {form.gameType === "singles" ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
@@ -486,7 +476,6 @@ export default function MatchDetails() {
                 onClick={exportCSV}
                 className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={sorted.length === 0}
-                title={sorted.length === 0 ? "No matches to export" : "Export CSV"}
               >
                 Export CSV
               </button>
@@ -494,7 +483,6 @@ export default function MatchDetails() {
                 onClick={exportPDF}
                 className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={sorted.length === 0}
-                title={sorted.length === 0 ? "No matches to export" : "Export PDF"}
               >
                 Export PDF
               </button>
@@ -507,7 +495,7 @@ export default function MatchDetails() {
             {!loggedIn ? (
               <div className="text-sm text-white/60">Login to view your matches.</div>
             ) : sorted.length === 0 ? (
-              <div className="text-sm text-white/60">No matches yet</div>
+              <div className="text-sm text-white/60">No matches yet.</div>
             ) : (
               sorted.map((m) => (
                 <div key={m.id} className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -516,15 +504,13 @@ export default function MatchDetails() {
                     {m.date} • {m.court} • {m.gameType}
                   </div>
                   <div className="text-xs text-white/60">
-                    Score: {m.scoreA} - {m.scoreB} • Winner: {m.winner}
+                    Score: {m.scoreA} - {m.scoreB} • Winner: {m.winner || "—"}
                   </div>
-                  {m.notes ? (
-                    <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div>
-                  ) : null}
+                  {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
 
                   <button
                     onClick={() => remove(m.id)}
-                    className="mt-2 text-xs underline text-white/70 disabled:opacity-40"
+                    className="mt-2 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
                     disabled={loading}
                   >
                     Delete

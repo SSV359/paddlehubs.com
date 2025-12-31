@@ -1,5 +1,6 @@
 // /opt/paddlehubs-site/src/lib/auth.js
-// Phase 1: Cognito Hosted UI (PKCE) + basic session + JWT claim helpers
+// Phase 1 + Phase 2:
+// Cognito Hosted UI (PKCE) + token storage + helpers for ID/access token + claim helpers
 
 const AUTH_KEY = "ph_auth";
 const PKCE_KEY = "ph_pkce_verifier";
@@ -19,11 +20,23 @@ export function getAuth() {
 
 export function clearAuth() {
   localStorage.removeItem(AUTH_KEY);
+  localStorage.removeItem(PKCE_KEY);
 }
 
 export function isLoggedIn() {
   const a = getAuth();
   return !!(a?.access_token || a?.id_token);
+}
+
+/** ---------- Token getters (Phase II needs access token) ---------- */
+export function getAccessToken() {
+  const a = getAuth();
+  return a?.access_token || "";
+}
+
+export function getIdToken() {
+  const a = getAuth();
+  return a?.id_token || "";
 }
 
 /** ---------- PKCE helpers ---------- */
@@ -110,7 +123,7 @@ export async function exchangeCodeForTokens(code) {
   return tokens;
 }
 
-/** ---------- JWT claim helpers (for Phase 1 user->player mapping) ---------- */
+/** ---------- JWT claim helpers ---------- */
 function b64UrlToJson(b64url) {
   const pad = "=".repeat((4 - (b64url.length % 4)) % 4);
   const base64 = (b64url + pad).replace(/-/g, "+").replace(/_/g, "/");
@@ -118,15 +131,13 @@ function b64UrlToJson(b64url) {
   try {
     return JSON.parse(jsonStr);
   } catch {
+    // fallback for odd unicode edge-cases
     return JSON.parse(decodeURIComponent(escape(jsonStr)));
   }
 }
 
-export function getUserClaims() {
-  const a = getAuth();
-  const token = a?.id_token || "";
+function decodeClaims(token) {
   if (!token || !token.includes(".")) return null;
-
   try {
     const payload = token.split(".")[1];
     return b64UrlToJson(payload);
@@ -135,13 +146,38 @@ export function getUserClaims() {
   }
 }
 
+/**
+ * Phase II note:
+ * API Gateway JWT authorizer validates the ACCESS token.
+ * So prefer access token claims first; fallback to ID token claims.
+ */
+export function getUserClaims() {
+  return decodeClaims(getAccessToken()) || decodeClaims(getIdToken());
+}
+
+export function getIdTokenClaims() {
+  return decodeClaims(getIdToken());
+}
+
+export function getAccessTokenClaims() {
+  return decodeClaims(getAccessToken());
+}
+
 export function getUserEmail() {
+  // email is reliably on ID token; access token may not always contain it
+  const idc = getIdTokenClaims();
   const c = getUserClaims();
-  return c?.email || "";
+  return idc?.email || c?.email || "";
 }
 
 export function getUserSub() {
   const c = getUserClaims();
   return c?.sub || "";
+}
+
+/** Helpful for debugging */
+export function getTokenUse() {
+  const c = getAccessTokenClaims();
+  return c?.token_use || "";
 }
 

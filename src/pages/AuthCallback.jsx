@@ -1,37 +1,55 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { exchangeCodeForTokens } from "../lib/auth.js";
 
 export default function AuthCallback() {
-  const nav = useNavigate();
-  const [msg, setMsg] = useState("Signing you in…");
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    (async () => {
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
-        if (!code) throw new Error("Missing code in callback URL");
+    async function run() {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const err = params.get("error");
 
+      if (err) {
+        setError(err);
+        return;
+      }
+
+      if (!code) {
+        setError("Missing authorization code.");
+        return;
+      }
+
+      try {
         await exchangeCodeForTokens(code);
 
-        // ✅ remove ?code=... from address bar
-        window.history.replaceState({}, document.title, "/match-details");
+        // clean up URL
+        window.history.replaceState({}, document.title, "/");
 
-        // ✅ go to a protected page to confirm login is active
-        nav("/match-details", { replace: true });
+        // go to dashboard
+        navigate("/", { replace: true });
       } catch (e) {
-        console.error(e);
-        setMsg("Login failed: " + (e?.message || "unknown error"));
+        setError(e.message || "Login failed");
       }
-    })();
-  }, [nav]);
+    }
+
+    run();
+  }, [navigate]);
 
   return (
-    <div className="mx-auto max-w-xl mt-10 rounded-3xl border border-white/10 bg-white/5 p-6 text-white">
-      <div className="text-xl font-semibold">Login</div>
-      <div className="mt-2 text-sm text-white/70">{msg}</div>
+    <div className="min-h-[60vh] flex items-center justify-center text-white">
+      {error ? (
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-6 py-4">
+          <div className="font-semibold">Authentication Error</div>
+          <div className="text-sm mt-2">{error}</div>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
+          Signing you in…
+        </div>
+      )}
     </div>
   );
 }
-

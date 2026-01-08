@@ -9,6 +9,7 @@ import CourtBooking from "./pages/CourtBooking.jsx";
 import MatchDetails from "./pages/MatchDetails.jsx";
 import Profile from "./pages/Profile.jsx";
 import AuthCallback from "./pages/AuthCallback.jsx";
+import ClubActivity from "./pages/ClubActivity.jsx";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
         {/* Public */}
         <Route path="/" element={<Dashboard />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/club-activity" element={<ClubActivity />} />
 
         {/* Protected */}
         <Route

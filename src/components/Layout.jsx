@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { CalendarDays, Home, Menu, Swords, User, X } from "lucide-react";
+import { CalendarDays, Home, Menu, Swords, User, X, Users } from "lucide-react";
 
 import logo from "../assets/paddlehubs-logo.png";
 import { loginUrl, logoutUrl, isLoggedIn, getUserEmail, clearAuth } from "../lib/auth.js";
@@ -72,6 +72,7 @@ export default function Layout() {
       { to: "/court-booking", label: "Court Booking", icon: CalendarDays, public: false },
       { to: "/match-details", label: "Match Details", icon: Swords, public: false },
       { to: "/profile", label: "My Profile", icon: User, public: false },
+      { to: "/club-activity", label: "Club Activity", icon: Users, public: false },
     ],
     []
   );

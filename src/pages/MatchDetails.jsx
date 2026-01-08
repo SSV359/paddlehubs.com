@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { isLoggedIn, getUserEmail, getUserSub } from "../lib/auth.js";
-import { api } from "../lib/api.js";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+
+import { isLoggedIn, getUserEmail } from "../lib/auth.js";
+import { api } from "../lib/api.js";
 
 function trim(v) {
   return (v || "").trim();
 }
 
 function emailPrefix(email) {
-  return (email || "").split("@")[0] || "";
+  return (email || "").split("@")[0] || email || "";
 }
 
 function calcWinner(labelA, labelB, scoreA, scoreB) {
@@ -24,9 +25,7 @@ function buildMatchup(form) {
   if (form.gameType === "singles") {
     const p1 = trim(form.singlesP1);
     const p2 = trim(form.singlesP2);
-    const labelA = p1;
-    const labelB = p2;
-    return { labelA, labelB, matchup: `${p1} vs ${p2}` };
+    return { labelA: p1, labelB: p2, matchup: `${p1} vs ${p2}` };
   }
 
   const a1 = trim(form.doublesT1P1);
@@ -72,7 +71,6 @@ function downloadBlob({ content, filename, mime }) {
 
 export default function MatchDetails() {
   const loggedIn = isLoggedIn();
-  const sub = getUserSub();
   const email = getUserEmail();
 
   const [loading, setLoading] = useState(false);
@@ -103,8 +101,6 @@ export default function MatchDetails() {
     if (!loggedIn) {
       setMe(null);
       setMatches([]);
-      setError("");
-      setInfo("");
       return;
     }
 
@@ -116,12 +112,13 @@ export default function MatchDetails() {
       const m = await api.getMe();
       setMe(m);
 
-      const p1 = (m?.displayName || "").trim() || emailPrefix(email);
+      const display = (m?.displayName || "").trim() || emailPrefix(email);
 
+      // autofill "you" fields if empty
       setForm((f) => ({
         ...f,
-        singlesP1: trim(f.singlesP1) ? f.singlesP1 : p1,
-        doublesT1P1: trim(f.doublesT1P1) ? f.doublesT1P1 : p1,
+        singlesP1: trim(f.singlesP1) ? f.singlesP1 : display,
+        doublesT1P1: trim(f.doublesT1P1) ? f.doublesT1P1 : display,
       }));
 
       const res = await api.listMatches(); // { items: [] }
@@ -136,7 +133,7 @@ export default function MatchDetails() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedIn, sub]);
+  }, [loggedIn]);
 
   const sorted = useMemo(() => {
     return (matches || [])
@@ -154,12 +151,12 @@ export default function MatchDetails() {
     setError("");
     setInfo("");
 
-    if (!loggedIn || !sub) {
+    if (!loggedIn) {
       setError("Please login to add matches.");
       return;
     }
     if (!form.date || !isValid(form)) {
-      setError("Please set a date and enter all player names.");
+      setError("Please select a date and enter all player names.");
       return;
     }
 
@@ -182,8 +179,6 @@ export default function MatchDetails() {
       setMatches((prev) => [created, ...(prev || [])]);
 
       setInfo("Match added ✅");
-
-      // keep Player 1 fields; clear rest
       setForm((f) => ({
         ...f,
         scoreA: 11,
@@ -204,6 +199,7 @@ export default function MatchDetails() {
   async function remove(id) {
     setError("");
     setInfo("");
+
     if (!loggedIn) return;
 
     setLoading(true);
@@ -288,7 +284,7 @@ export default function MatchDetails() {
     doc.save("paddlehubs_match_history.pdf");
   }
 
-  const display = (me?.displayName || "").trim() || emailPrefix(email);
+  const displayName = (me?.displayName || "").trim() || emailPrefix(email);
   const preview = isValid(form) ? buildMatchup(form).matchup : "Enter player names";
 
   return (
@@ -298,7 +294,7 @@ export default function MatchDetails() {
         <div className="text-sm text-white/70 mt-1">
           {loggedIn ? (
             <>
-              Logged in as <span className="font-semibold">{display || email || "user"}</span> • Matches saved in the shared club database
+              Logged in as <span className="font-semibold">{displayName || email || "user"}</span> • Matches saved in the shared club database
             </>
           ) : (
             "Please login to add matches."
@@ -320,8 +316,8 @@ export default function MatchDetails() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Form */}
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center justify-between">
-            <div className="font-semibold">New Match</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-lg font-semibold">New Match</div>
             <button
               type="button"
               onClick={loadAll}
@@ -495,7 +491,7 @@ export default function MatchDetails() {
             {!loggedIn ? (
               <div className="text-sm text-white/60">Login to view your matches.</div>
             ) : sorted.length === 0 ? (
-              <div className="text-sm text-white/60">No matches yet.</div>
+              <div className="text-sm text-white/60">No matches yet</div>
             ) : (
               sorted.map((m) => (
                 <div key={m.id} className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -504,13 +500,12 @@ export default function MatchDetails() {
                     {m.date} • {m.court} • {m.gameType}
                   </div>
                   <div className="text-xs text-white/60">
-                    Score: {m.scoreA} - {m.scoreB} • Winner: {m.winner || "—"}
+                    Score: {m.scoreA} - {m.scoreB} • Winner: {m.winner}
                   </div>
                   {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
-
                   <button
                     onClick={() => remove(m.id)}
-                    className="mt-2 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+                    className="mt-2 text-xs underline text-white/70 disabled:opacity-40"
                     disabled={loading}
                   >
                     Delete

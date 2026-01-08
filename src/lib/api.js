@@ -102,5 +102,12 @@ export const api = {
   deleteMatch(id) {
     return req(`/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
+ // ✅ -------- Club (shared) --------
+  listClubBookings() {
+    return req("/club/bookings");
+  },
+  listClubMatches() {
+    return req("/club/matches");
+  },
 };
 

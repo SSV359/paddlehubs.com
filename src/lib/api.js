@@ -109,5 +109,30 @@ export const api = {
   listClubMatches() {
     return req("/club/matches");
   },
+
+
+  // -------- Tournaments --------
+  listTournaments() {
+    return req("/tournaments");
+  },
+  createTournament(payload) {
+    return req("/tournaments", { method: "POST", body: payload });
+  },
+  getTournament(id) {
+    return req(`/tournaments/${encodeURIComponent(id)}`);
+  },
+
+  // -------- Tournament Matches --------
+  listTournamentMatches(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches`);
+  },
+  createTournamentMatch(tournamentId, payload) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+
 };
 

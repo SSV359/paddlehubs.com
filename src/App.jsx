@@ -11,6 +11,9 @@ import Profile from "./pages/Profile.jsx";
 import AuthCallback from "./pages/AuthCallback.jsx";
 import ClubActivity from "./pages/ClubActivity.jsx";
 
+import Tournaments from "./pages/Tournaments.jsx";
+import TournamentDetails from "./pages/TournamentDetails.jsx";
+
 export default function App() {
   return (
     <Routes>
@@ -42,6 +45,24 @@ export default function App() {
           element={
             <RequireAuth>
               <Profile />
+            </RequireAuth>
+          }
+        />
+
+        {/* Tournaments (Protected) */}
+        <Route
+          path="/tournaments"
+          element={
+            <RequireAuth>
+              <Tournaments />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tournaments/:id"
+          element={
+            <RequireAuth>
+              <TournamentDetails />
             </RequireAuth>
           }
         />

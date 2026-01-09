@@ -106,11 +106,14 @@ export async function exchangeCodeForTokens(code) {
     code_verifier: verifier,
   });
 
-  const res = await fetch(`${import.meta.env.VITE_COGNITO_DOMAIN}/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const res = await fetch(
+    `${import.meta.env.VITE_COGNITO_DOMAIN}/oauth2/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    }
+  );
 
   if (!res.ok) {
     const t = await res.text();
@@ -179,5 +182,34 @@ export function getUserSub() {
 export function getTokenUse() {
   const c = getAccessTokenClaims();
   return c?.token_use || "";
+}
+
+/** ---------- Groups / Admin helpers ---------- */
+export function getUserGroups() {
+  const c = getAccessTokenClaims() || getIdTokenClaims() || {};
+  const g = c["cognito:groups"];
+
+  if (!g) return [];
+  if (Array.isArray(g)) return g;
+
+  return String(g)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function isAdmin() {
+  return getUserGroups().includes("admins");
+}
+
+/**
+ * Convenience for UI decisions:
+ * allow if admin OR the item is owned by current user.
+ * itemOwnerSub can be: item.ownerSub
+ */
+export function isAdminOrOwner(itemOwnerSub) {
+  if (isAdmin()) return true;
+  const me = getUserSub();
+  return !!me && !!itemOwnerSub && me === itemOwnerSub;
 }
 

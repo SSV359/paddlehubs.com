@@ -3,6 +3,10 @@ import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
 
 const API_BASE_RAW = import.meta.env.VITE_API_BASE;
 
+import { isAdmin } from "../lib/auth.js";
+const admin = isAdmin();
+
+
 /**
  * Normalize base so it never ends with "/" and never double-adds "/prod".
  * Recommended .env:
@@ -132,6 +136,37 @@ export const api = {
       body: payload,
     });
   },
+
+// Admin: delete any match (club matches)
+adminDeleteMatch(id) {
+  return req(`/admin/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
+},
+
+// Admin: delete tournament
+deleteTournament(id) {
+  return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
+},
+
+// Admin: delete a tournament match
+deleteTournamentMatch(tournamentId, matchId) {
+  return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`, {
+    method: "DELETE",
+  });
+},
+
+// -------- Admin Tournament Deletes --------
+deleteTournament(id) {
+  return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
+},
+
+deleteTournamentMatch(tournamentId, matchId) {
+  return req(
+    `/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`,
+    { method: "DELETE" }
+  );
+},
+
+
 
 
 };

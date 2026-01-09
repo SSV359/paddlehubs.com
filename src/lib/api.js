@@ -3,11 +3,6 @@ import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
 
 const API_BASE_RAW = import.meta.env.VITE_API_BASE;
 
-/**
- * Normalize base so it never ends with "/" and never double-adds "/prod".
- * Recommended .env:
- *   VITE_API_BASE=https://kkz5s0g014.execute-api.us-east-1.amazonaws.com/prod
- */
 function normalizeBase(base) {
   if (!base) return "";
   return base.replace(/\/+$/, "");
@@ -17,15 +12,12 @@ const API_BASE = normalizeBase(API_BASE_RAW);
 
 function authHeader() {
   const a = getAuth();
-  // API Gateway JWT authorizer validates ACCESS token
   const token = a?.access_token || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function req(path, { method = "GET", body } = {}) {
   if (!API_BASE) throw new Error("Missing VITE_API_BASE in .env");
-
-  // client-side enforcement for protected endpoints
   if (!isLoggedIn()) throw new Error("Not logged in");
 
   const url = `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
@@ -37,11 +29,7 @@ async function req(path, { method = "GET", body } = {}) {
     payload = JSON.stringify(body);
   }
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: payload,
-  });
+  const res = await fetch(url, { method, headers, body: payload });
 
   const text = await res.text();
   let data = {};
@@ -51,13 +39,9 @@ async function req(path, { method = "GET", body } = {}) {
     data = { raw: text };
   }
 
-  // Auth failures: clear stored tokens so UI forces fresh login
   if (res.status === 401 || res.status === 403) {
     clearAuth();
-    const msg =
-      data?.error ||
-      data?.message ||
-      "Unauthorized. Please login again (token expired).";
+    const msg = data?.error || data?.message || "Unauthorized. Please login again.";
     throw new Error(msg);
   }
 
@@ -76,6 +60,11 @@ export const api = {
   },
   putMe(payload) {
     return req("/me", { method: "PUT", body: payload });
+  },
+
+  // -------- Rankings --------
+  getRankings() {
+    return req("/rankings"); // { items: [...] }
   },
 
   // -------- Bookings --------
@@ -127,8 +116,12 @@ export const api = {
     return req(`/tournaments/${encodeURIComponent(id)}`);
   },
   deleteTournament(id) {
-    // backend decides: admin-only OR (admin OR owner) depending on your Lambda logic
     return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  // Tournament standings (computed)
+  getTournamentStandings(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/standings`);
   },
 
   // -------- Tournament Matches --------
@@ -142,7 +135,6 @@ export const api = {
     });
   },
   deleteTournamentMatch(tournamentId, matchId) {
-    // backend decides: admin-only OR (admin OR owner) depending on your Lambda logic
     return req(
       `/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`,
       { method: "DELETE" }

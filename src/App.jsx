@@ -1,9 +1,11 @@
+// /opt/paddlehubs-site/src/App.jsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 
 import Layout from "./components/Layout.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
 
+// Pages
 import Dashboard from "./pages/Dashboard.jsx";
 import CourtBooking from "./pages/CourtBooking.jsx";
 import MatchDetails from "./pages/MatchDetails.jsx";
@@ -13,17 +15,19 @@ import ClubActivity from "./pages/ClubActivity.jsx";
 
 import Tournaments from "./pages/Tournaments.jsx";
 import TournamentDetails from "./pages/TournamentDetails.jsx";
+import Rankings from "./pages/Rankings.jsx"; // ✅ ADD THIS
 
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        {/* Public */}
+        {/* ---------- Public ---------- */}
         <Route path="/" element={<Dashboard />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/club-activity" element={<ClubActivity />} />
+        <Route path="/rankings" element={<Rankings />} /> {/* ✅ Rankings page */}
 
-        {/* Protected */}
+        {/* ---------- Protected ---------- */}
         <Route
           path="/court-booking"
           element={
@@ -32,6 +36,7 @@ export default function App() {
             </RequireAuth>
           }
         />
+
         <Route
           path="/match-details"
           element={
@@ -40,6 +45,7 @@ export default function App() {
             </RequireAuth>
           }
         />
+
         <Route
           path="/profile"
           element={
@@ -49,7 +55,7 @@ export default function App() {
           }
         />
 
-        {/* Tournaments (Protected) */}
+        {/* ---------- Tournaments (Protected) ---------- */}
         <Route
           path="/tournaments"
           element={
@@ -58,6 +64,7 @@ export default function App() {
             </RequireAuth>
           }
         />
+
         <Route
           path="/tournaments/:id"
           element={
@@ -67,7 +74,7 @@ export default function App() {
           }
         />
 
-        {/* Catch-all */}
+        {/* ---------- Catch-all ---------- */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

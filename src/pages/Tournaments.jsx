@@ -1,3 +1,4 @@
+// /opt/paddlehubs-site/src/pages/Tournaments.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isLoggedIn } from "../lib/auth.js";
@@ -23,6 +24,8 @@ function statusBadge(status) {
   if (s === "ARCHIVED") return `${base} border-white/10 bg-white/5 text-white/70`;
   return `${base} border-amber-400/30 bg-amber-500/10 text-amber-100`;
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function Tournaments() {
   const navigate = useNavigate();
@@ -106,9 +109,23 @@ export default function Tournaments() {
       setItems((prev) => [created, ...(prev || [])]);
       setMsg("Tournament created ✅");
       setForm((f) => ({ ...f, name: "" }));
-      navigate(`/tournaments/${encodeURIComponent(created.id)}`);
+
+      // Confirm it exists before navigating (prevents landing on cached/temporary 404)
+      try {
+        await api.getTournament(created.id);
+        navigate(`/tournaments/${encodeURIComponent(created.id)}`);
+      } catch {
+        // small retry (handles eventual consistency / caching edge cases)
+        await sleep(300);
+        await api.getTournament(created.id);
+        navigate(`/tournaments/${encodeURIComponent(created.id)}`);
+      }
     } catch (e2) {
       setErr(String(e2?.message || e2));
+      // best-effort refresh list so UI stays accurate
+      try {
+        await load();
+      } catch {}
     } finally {
       setLoading(false);
     }

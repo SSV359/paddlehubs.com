@@ -1,7 +1,6 @@
-// /opt/paddlehubs-site/src/pages/TournamentDetails.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { isLoggedIn, getUserEmail, isAdmin, isAdminOrOwner } from "../lib/auth.js";
+import { isLoggedIn, getUserEmail, isAdmin } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 
 function trim(v) {
@@ -57,6 +56,7 @@ export default function TournamentDetails() {
 
   const loggedIn = isLoggedIn();
   const email = getUserEmail();
+  const admin = isAdmin();
 
   const [loading, setLoading] = useState(false);
   const [tournament, setTournament] = useState(null);
@@ -82,9 +82,6 @@ export default function TournamentDetails() {
     doublesT2P2: "",
   }));
 
-  // Admin flag for UI (token-based; enforced again on Lambda)
-  const admin = useMemo(() => isAdmin(), [loggedIn]);
-
   useEffect(() => {
     setForm((f) => ({
       ...f,
@@ -106,11 +103,10 @@ export default function TournamentDetails() {
 
     setLoading(true);
     try {
-      // ✅ Lambda returns tournament item directly (NOT { item })
       const tItem = await api.getTournament(id);
       setTournament(tItem || null);
 
-      const mRes = await api.listTournamentMatches(id); // { items: [] }
+      const mRes = await api.listTournamentMatches(id);
       setMatches(mRes?.items || []);
     } catch (e) {
       setErr(String(e?.message || e));
@@ -169,7 +165,6 @@ export default function TournamentDetails() {
 
     setLoading(true);
     try {
-      // ✅ Lambda route: POST /tournaments/{id}/matches returns match item directly
       const created = await api.createTournamentMatch(id, payload);
       setMatches((prev) => [created, ...(prev || [])]);
       setMsg("Match added ✅");
@@ -192,32 +187,20 @@ export default function TournamentDetails() {
     }
   }
 
-  async function deleteMatch(m) {
+  async function deleteTournament() {
     setErr("");
     setMsg("");
-
-    if (!loggedIn) return setErr("Please login.");
+    if (!admin) return setErr("Admin only.");
     if (!id) return setErr("Missing tournament id.");
-    if (!m?.id) return setErr("Missing match id.");
 
-    // UI guard (Lambda still enforces admin)
-    if (!isAdminOrOwner(m.ownerSub)) {
-      return setErr("You can delete only your own match (admins can delete any).");
-    }
-
-    const ok = window.confirm(`Delete this match?\n\n${m.matchup || ""}`);
+    const ok = window.confirm("Delete this tournament? This cannot be undone.");
     if (!ok) return;
 
     setLoading(true);
     try {
-      // IMPORTANT:
-      // - If you implemented ADMIN delete: DELETE /tournaments/{id}/matches/{matchId} (admin only)
-      // - If you implemented OWNER delete: you can also allow owners on same route OR a separate route
-      // Here we call the admin route; owner will get 403 unless backend allows owner too.
-      await api.deleteTournamentMatch(id, m.id);
-
-      setMatches((prev) => (prev || []).filter((x) => x.id !== m.id));
-      setMsg("Match deleted ✅");
+      await api.deleteTournament(id); // DELETE /tournaments/{id}
+      setMsg("Tournament deleted ✅");
+      navigate("/tournaments");
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
@@ -225,24 +208,21 @@ export default function TournamentDetails() {
     }
   }
 
-  async function deleteTournament() {
+  async function deleteMatch(matchId) {
     setErr("");
     setMsg("");
-
-    if (!loggedIn) return setErr("Please login.");
-    if (!id) return setErr("Missing tournament id.");
     if (!admin) return setErr("Admin only.");
+    if (!id) return setErr("Missing tournament id.");
+    if (!matchId) return setErr("Missing match id.");
 
-    const ok = window.confirm(
-      `Delete this tournament and ALL its matches?\n\n${tournament?.name || "Tournament"}`
-    );
+    const ok = window.confirm("Delete this match?");
     if (!ok) return;
 
     setLoading(true);
     try {
-      await api.deleteTournament(id);
-      setMsg("Tournament deleted ✅");
-      navigate("/tournaments");
+      await api.deleteTournamentMatch(id, matchId); // DELETE /tournaments/{id}/matches/{matchId}
+      setMatches((prev) => (prev || []).filter((m) => m.id !== matchId));
+      setMsg("Match deleted ✅");
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
@@ -255,19 +235,11 @@ export default function TournamentDetails() {
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-white/5 to-emerald-500/15 p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-2xl font-semibold">
-              {tournament?.name || "Tournament"}
-            </div>
+            <div className="text-2xl font-semibold">{tournament?.name || "Tournament"}</div>
             <div className="text-sm text-white/70 mt-1">
               {tournament?.startDate || "—"} → {tournament?.endDate || "—"} •{" "}
-              <span className="font-semibold">
-                {String(tournament?.status || "ACTIVE")}
-              </span>
-              {admin ? (
-                <span className="ml-2 inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-100">
-                  Admin
-                </span>
-              ) : null}
+              <span className="font-semibold">{String(tournament?.status || "ACTIVE")}</span>
+              {admin ? <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-xs">Admin</span> : null}
             </div>
           </div>
 
@@ -275,9 +247,8 @@ export default function TournamentDetails() {
             {admin ? (
               <button
                 onClick={deleteTournament}
-                className="rounded-2xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-3 py-2 text-xs text-red-100 disabled:opacity-40"
+                className="rounded-2xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={loading}
-                title="Admin only"
               >
                 Delete Tournament
               </button>
@@ -457,8 +428,7 @@ export default function TournamentDetails() {
               </button>
 
               <div className="text-xs text-white/60">
-                Saves match under tournament:{" "}
-                <span className="font-semibold">{id}</span>
+                Saves match under tournament: <span className="font-semibold">{id}</span>
               </div>
             </form>
           </div>
@@ -474,71 +444,42 @@ export default function TournamentDetails() {
               {sorted.length === 0 ? (
                 <div className="text-sm text-white/70">No matches yet.</div>
               ) : (
-                sorted.map((m) => {
-                  const canDelete = isAdminOrOwner(m.ownerSub);
-                  return (
-                    <div
-                      key={m.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold">
-                            {m.matchup || "Match"}
-                          </div>
-                          <div className="text-xs text-white/60 mt-1">
-                            {m.date || "—"} • {m.court || "—"} •{" "}
-                            {m.gameType || "—"}
-                          </div>
-                          <div className="text-xs text-white/60">
-                            Score: {m.scoreA ?? "—"} - {m.scoreB ?? "—"} • Winner:{" "}
-                            <span className="font-semibold">
-                              {m.winner || "—"}
-                            </span>
-                          </div>
-                          {m.ownerDisplayName ? (
-                            <div className="text-xs text-white/50 mt-1">
-                              Added by: {m.ownerDisplayName}
-                              {admin && !m.ownerSub ? (
-                                <span className="ml-2 text-[11px] text-amber-200/80">
-                                  (owner unknown)
-                                </span>
-                              ) : null}
-                            </div>
-                          ) : null}
-                          {m.notes ? (
-                            <div className="text-xs text-white/60 mt-1">
-                              Notes: {m.notes}
-                            </div>
-                          ) : null}
+                sorted.map((m) => (
+                  <div key={m.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">{m.matchup || "Match"}</div>
+                        <div className="text-xs text-white/60 mt-1">
+                          {m.date || "—"} • {m.court || "—"} • {m.gameType || "—"}
                         </div>
-
-                        <div className="shrink-0 flex flex-col items-end gap-2">
-                          {canDelete ? (
-                            <button
-                              type="button"
-                              onClick={() => deleteMatch(m)}
-                              disabled={loading}
-                              className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-3 py-2 text-xs text-red-100 disabled:opacity-40"
-                              title={admin ? "Admin delete" : "Delete your match"}
-                            >
-                              Delete
-                            </button>
-                          ) : (
-                            <div className="text-[11px] text-white/40">
-                              Only owner/admin
-                            </div>
-                          )}
+                        <div className="text-xs text-white/60">
+                          Score: {m.scoreA ?? "—"} - {m.scoreB ?? "—"} • Winner:{" "}
+                          <span className="font-semibold">{m.winner || "—"}</span>
                         </div>
+                        {m.ownerDisplayName ? (
+                          <div className="text-xs text-white/50 mt-1">Added by: {m.ownerDisplayName}</div>
+                        ) : null}
+                        {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
                       </div>
+
+                      {admin ? (
+                        <button
+                          onClick={() => deleteMatch(m.id)}
+                          className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-2.5 py-1.5 text-xs disabled:opacity-40"
+                          disabled={loading}
+                          title="Admin delete"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
-                  );
-                })
+                  </div>
+                ))
               )}
             </div>
 
             <div className="mt-4 text-xs text-white/60">
-              Next: standings + admin delete inside tournament.
+              Next: standings (auto-calc from matches) + table view.
             </div>
           </div>
         </div>

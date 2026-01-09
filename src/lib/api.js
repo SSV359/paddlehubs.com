@@ -3,10 +3,6 @@ import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
 
 const API_BASE_RAW = import.meta.env.VITE_API_BASE;
 
-import { isAdmin } from "../lib/auth.js";
-const admin = isAdmin();
-
-
 /**
  * Normalize base so it never ends with "/" and never double-adds "/prod".
  * Recommended .env:
@@ -21,7 +17,7 @@ const API_BASE = normalizeBase(API_BASE_RAW);
 
 function authHeader() {
   const a = getAuth();
-  // For API Gateway JWT authorizer, ACCESS TOKEN is best
+  // API Gateway JWT authorizer validates ACCESS token
   const token = a?.access_token || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
@@ -33,10 +29,8 @@ async function req(path, { method = "GET", body } = {}) {
   if (!isLoggedIn()) throw new Error("Not logged in");
 
   const url = `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
-
   const headers = { ...authHeader() };
 
-  // only set JSON headers when sending a body
   let payload;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -57,9 +51,8 @@ async function req(path, { method = "GET", body } = {}) {
     data = { raw: text };
   }
 
-  // handle auth failures nicely
+  // Auth failures: clear stored tokens so UI forces fresh login
   if (res.status === 401 || res.status === 403) {
-    // token expired / invalid -> clear local auth
     clearAuth();
     const msg =
       data?.error ||
@@ -106,7 +99,8 @@ export const api = {
   deleteMatch(id) {
     return req(`/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
- // ✅ -------- Club (shared) --------
+
+  // -------- Club (shared) --------
   listClubBookings() {
     return req("/club/bookings");
   },
@@ -114,6 +108,13 @@ export const api = {
     return req("/club/matches");
   },
 
+  // -------- Admin (delete any booking/match) --------
+  adminDeleteBooking(id) {
+    return req(`/admin/bookings/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  adminDeleteMatch(id) {
+    return req(`/admin/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
 
   // -------- Tournaments --------
   listTournaments() {
@@ -124,6 +125,10 @@ export const api = {
   },
   getTournament(id) {
     return req(`/tournaments/${encodeURIComponent(id)}`);
+  },
+  deleteTournament(id) {
+    // backend decides: admin-only OR (admin OR owner) depending on your Lambda logic
+    return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   // -------- Tournament Matches --------
@@ -136,38 +141,12 @@ export const api = {
       body: payload,
     });
   },
-
-// Admin: delete any match (club matches)
-adminDeleteMatch(id) {
-  return req(`/admin/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
-},
-
-// Admin: delete tournament
-deleteTournament(id) {
-  return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
-},
-
-// Admin: delete a tournament match
-deleteTournamentMatch(tournamentId, matchId) {
-  return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`, {
-    method: "DELETE",
-  });
-},
-
-// -------- Admin Tournament Deletes --------
-deleteTournament(id) {
-  return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
-},
-
-deleteTournamentMatch(tournamentId, matchId) {
-  return req(
-    `/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`,
-    { method: "DELETE" }
-  );
-},
-
-
-
-
+  deleteTournamentMatch(tournamentId, matchId) {
+    // backend decides: admin-only OR (admin OR owner) depending on your Lambda logic
+    return req(
+      `/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`,
+      { method: "DELETE" }
+    );
+  },
 };
 

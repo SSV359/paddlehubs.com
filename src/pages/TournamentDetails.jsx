@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { isLoggedIn, getUserEmail, isAdmin } from "../lib/auth.js";
+import { isLoggedIn, getUserEmail, getUserSub, isAdmin } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 
 function trim(v) {
@@ -56,6 +56,7 @@ export default function TournamentDetails() {
 
   const loggedIn = isLoggedIn();
   const email = getUserEmail();
+  const mySub = getUserSub();
   const admin = isAdmin();
 
   const [loading, setLoading] = useState(false);
@@ -103,10 +104,12 @@ export default function TournamentDetails() {
 
     setLoading(true);
     try {
-      const tItem = await api.getTournament(id);
+      // handle BOTH shapes: { item: t } OR t
+      const tRes = await api.getTournament(id);
+      const tItem = tRes?.item ? tRes.item : tRes;
       setTournament(tItem || null);
 
-      const mRes = await api.listTournamentMatches(id);
+      const mRes = await api.listTournamentMatches(id); // { items: [] }
       setMatches(mRes?.items || []);
     } catch (e) {
       setErr(String(e?.message || e));
@@ -139,6 +142,52 @@ export default function TournamentDetails() {
     if (!isValid({ ...form, date: "x" })) return "Enter player names";
     return buildMatchup(form).matchup;
   }, [form]);
+
+  const canDeleteTournament = admin || (tournament?.ownerSub && tournament.ownerSub === mySub);
+
+  async function onDeleteTournament() {
+    setErr("");
+    setMsg("");
+    if (!id) return;
+
+    const ok = confirm("Delete this tournament? This cannot be undone.");
+    if (!ok) return;
+
+    setLoading(true);
+    try {
+      await api.deleteTournament(id);
+      setMsg("Tournament deleted ✅");
+      navigate("/tournaments");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function canDeleteMatch(m) {
+    return admin || (m?.ownerSub && m.ownerSub === mySub);
+  }
+
+  async function onDeleteMatch(matchId) {
+    setErr("");
+    setMsg("");
+    if (!id || !matchId) return;
+
+    const ok = confirm("Delete this match?");
+    if (!ok) return;
+
+    setLoading(true);
+    try {
+      await api.deleteTournamentMatch(id, matchId);
+      setMatches((prev) => (prev || []).filter((x) => x.id !== matchId));
+      setMsg("Match deleted ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function addMatch(e) {
     e.preventDefault();
@@ -187,49 +236,6 @@ export default function TournamentDetails() {
     }
   }
 
-  async function deleteTournament() {
-    setErr("");
-    setMsg("");
-    if (!admin) return setErr("Admin only.");
-    if (!id) return setErr("Missing tournament id.");
-
-    const ok = window.confirm("Delete this tournament? This cannot be undone.");
-    if (!ok) return;
-
-    setLoading(true);
-    try {
-      await api.deleteTournament(id); // DELETE /tournaments/{id}
-      setMsg("Tournament deleted ✅");
-      navigate("/tournaments");
-    } catch (e) {
-      setErr(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function deleteMatch(matchId) {
-    setErr("");
-    setMsg("");
-    if (!admin) return setErr("Admin only.");
-    if (!id) return setErr("Missing tournament id.");
-    if (!matchId) return setErr("Missing match id.");
-
-    const ok = window.confirm("Delete this match?");
-    if (!ok) return;
-
-    setLoading(true);
-    try {
-      await api.deleteTournamentMatch(id, matchId); // DELETE /tournaments/{id}/matches/{matchId}
-      setMatches((prev) => (prev || []).filter((m) => m.id !== matchId));
-      setMsg("Match deleted ✅");
-    } catch (e) {
-      setErr(String(e?.message || e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-white/5 to-emerald-500/15 p-6">
@@ -239,14 +245,21 @@ export default function TournamentDetails() {
             <div className="text-sm text-white/70 mt-1">
               {tournament?.startDate || "—"} → {tournament?.endDate || "—"} •{" "}
               <span className="font-semibold">{String(tournament?.status || "ACTIVE")}</span>
-              {admin ? <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-xs">Admin</span> : null}
+              {admin ? (
+                <span className="ml-2 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px]">
+                  Admin
+                </span>
+              ) : null}
             </div>
+            {tournament?.ownerDisplayName ? (
+              <div className="text-xs text-white/50 mt-1">Created by: {tournament.ownerDisplayName}</div>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
-            {admin ? (
+            {loggedIn && tournament && canDeleteTournament ? (
               <button
-                onClick={deleteTournament}
+                onClick={onDeleteTournament}
                 className="rounded-2xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={loading}
               >
@@ -426,10 +439,6 @@ export default function TournamentDetails() {
               >
                 {loading ? "Saving..." : "Add Match to Tournament"}
               </button>
-
-              <div className="text-xs text-white/60">
-                Saves match under tournament: <span className="font-semibold">{id}</span>
-              </div>
             </form>
           </div>
 
@@ -446,7 +455,7 @@ export default function TournamentDetails() {
               ) : (
                 sorted.map((m) => (
                   <div key={m.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="font-semibold">{m.matchup || "Match"}</div>
                         <div className="text-xs text-white/60 mt-1">
@@ -462,12 +471,11 @@ export default function TournamentDetails() {
                         {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
                       </div>
 
-                      {admin ? (
+                      {canDeleteMatch(m) ? (
                         <button
-                          onClick={() => deleteMatch(m.id)}
-                          className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-2.5 py-1.5 text-xs disabled:opacity-40"
+                          onClick={() => onDeleteMatch(m.id)}
+                          className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-2 py-1 text-[11px] disabled:opacity-40"
                           disabled={loading}
-                          title="Admin delete"
                         >
                           Delete
                         </button>
@@ -479,7 +487,7 @@ export default function TournamentDetails() {
             </div>
 
             <div className="mt-4 text-xs text-white/60">
-              Next: standings (auto-calc from matches) + table view.
+              Next: standings (auto-calc) can be added using match winners + matchup parsing.
             </div>
           </div>
         </div>

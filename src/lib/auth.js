@@ -1,6 +1,4 @@
 // /opt/paddlehubs-site/src/lib/auth.js
-// Phase 1 + Phase 2:
-// Cognito Hosted UI (PKCE) + token storage + helpers for ID/access token + claim helpers
 
 const AUTH_KEY = "ph_auth";
 const PKCE_KEY = "ph_pkce_verifier";
@@ -9,7 +7,6 @@ const PKCE_KEY = "ph_pkce_verifier";
 export function setAuth(tokens) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(tokens));
 }
-
 export function getAuth() {
   try {
     return JSON.parse(localStorage.getItem(AUTH_KEY)) || null;
@@ -17,23 +14,20 @@ export function getAuth() {
     return null;
   }
 }
-
 export function clearAuth() {
   localStorage.removeItem(AUTH_KEY);
   localStorage.removeItem(PKCE_KEY);
 }
-
 export function isLoggedIn() {
   const a = getAuth();
   return !!(a?.access_token || a?.id_token);
 }
 
-/** ---------- Token getters (Phase II needs access token) ---------- */
+/** ---------- Token getters ---------- */
 export function getAccessToken() {
   const a = getAuth();
   return a?.access_token || "";
 }
-
 export function getIdToken() {
   const a = getAuth();
   return a?.id_token || "";
@@ -41,8 +35,7 @@ export function getIdToken() {
 
 /** ---------- PKCE helpers ---------- */
 function randomVerifier(length = 64) {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   let out = "";
   const bytes = crypto.getRandomValues(new Uint8Array(length));
   for (let i = 0; i < bytes.length; i++) out += chars[bytes[i] % chars.length];
@@ -93,7 +86,7 @@ export function logoutUrl() {
   return `${domain}/logout?${params.toString()}`;
 }
 
-/** ---------- Token exchange on /auth/callback ---------- */
+/** ---------- Token exchange ---------- */
 export async function exchangeCodeForTokens(code) {
   const verifier = localStorage.getItem(PKCE_KEY);
   if (!verifier) throw new Error("Missing PKCE verifier. Start login again.");
@@ -106,14 +99,11 @@ export async function exchangeCodeForTokens(code) {
     code_verifier: verifier,
   });
 
-  const res = await fetch(
-    `${import.meta.env.VITE_COGNITO_DOMAIN}/oauth2/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    }
-  );
+  const res = await fetch(`${import.meta.env.VITE_COGNITO_DOMAIN}/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
 
   if (!res.ok) {
     const t = await res.text();
@@ -134,7 +124,6 @@ function b64UrlToJson(b64url) {
   try {
     return JSON.parse(jsonStr);
   } catch {
-    // fallback for odd unicode edge-cases
     return JSON.parse(decodeURIComponent(escape(jsonStr)));
   }
 }
@@ -149,25 +138,17 @@ function decodeClaims(token) {
   }
 }
 
-/**
- * Phase II note:
- * API Gateway JWT authorizer validates the ACCESS token.
- * So prefer access token claims first; fallback to ID token claims.
- */
 export function getUserClaims() {
   return decodeClaims(getAccessToken()) || decodeClaims(getIdToken());
 }
-
 export function getIdTokenClaims() {
   return decodeClaims(getIdToken());
 }
-
 export function getAccessTokenClaims() {
   return decodeClaims(getAccessToken());
 }
 
 export function getUserEmail() {
-  // email is reliably on ID token; access token may not always contain it
   const idc = getIdTokenClaims();
   const c = getUserClaims();
   return idc?.email || c?.email || "";
@@ -178,38 +159,15 @@ export function getUserSub() {
   return c?.sub || "";
 }
 
-/** Helpful for debugging */
-export function getTokenUse() {
-  const c = getAccessTokenClaims();
-  return c?.token_use || "";
-}
-
-/** ---------- Groups / Admin helpers ---------- */
 export function getUserGroups() {
-  const c = getAccessTokenClaims() || getIdTokenClaims() || {};
+  const c = getAccessTokenClaims() || {};
   const g = c["cognito:groups"];
-
   if (!g) return [];
   if (Array.isArray(g)) return g;
-
-  return String(g)
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return String(g).split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 export function isAdmin() {
   return getUserGroups().includes("admins");
-}
-
-/**
- * Convenience for UI decisions:
- * allow if admin OR the item is owned by current user.
- * itemOwnerSub can be: item.ownerSub
- */
-export function isAdminOrOwner(itemOwnerSub) {
-  if (isAdmin()) return true;
-  const me = getUserSub();
-  return !!me && !!itemOwnerSub && me === itemOwnerSub;
 }
 

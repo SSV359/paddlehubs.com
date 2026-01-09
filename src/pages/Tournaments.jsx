@@ -17,7 +17,7 @@ function toISODate(d) {
 }
 
 function statusBadge(status) {
-  const s = String(status || "").toUpperCase();
+  const s = String(status || "ACTIVE").toUpperCase();
   const base = "inline-flex items-center rounded-full px-2 py-1 text-[11px] border";
   if (s === "ACTIVE") return `${base} border-emerald-400/30 bg-emerald-500/10 text-emerald-100`;
   if (s === "ARCHIVED") return `${base} border-white/10 bg-white/5 text-white/70`;
@@ -36,11 +36,7 @@ export default function Tournaments() {
 
   const [form, setForm] = useState(() => {
     const today = toISODate(new Date());
-    return {
-      name: "",
-      startDate: today,
-      endDate: today,
-    };
+    return { name: "", startDate: today, endDate: today };
   });
 
   function onChange(e) {
@@ -75,14 +71,12 @@ export default function Tournaments() {
   const sorted = useMemo(() => {
     const list = (items || []).slice();
     list.sort((a, b) => {
-      const as = String(a.status || "").toUpperCase();
-      const bs = String(b.status || "").toUpperCase();
+      const as = String(a.status || "ACTIVE").toUpperCase();
+      const bs = String(b.status || "ACTIVE").toUpperCase();
       if (as !== bs) {
-        // ACTIVE first
         if (as === "ACTIVE") return -1;
         if (bs === "ACTIVE") return 1;
       }
-      // Newest startDate first fallback createdAt
       const ad = String(a.startDate || a.createdAt || "");
       const bd = String(b.startDate || b.createdAt || "");
       return bd.localeCompare(ad);
@@ -95,10 +89,7 @@ export default function Tournaments() {
     setErr("");
     setMsg("");
 
-    if (!loggedIn) {
-      setErr("Please login to create a tournament.");
-      return;
-    }
+    if (!loggedIn) return setErr("Please login to create a tournament.");
 
     const name = String(form.name || "").trim();
     const startDate = String(form.startDate || "").trim();
@@ -111,11 +102,10 @@ export default function Tournaments() {
 
     setLoading(true);
     try {
-      const created = await api.createTournament({ name, startDate, endDate }); // returns created item
+      const created = await api.createTournament({ name, startDate, endDate }); // returns item
       setItems((prev) => [created, ...(prev || [])]);
       setMsg("Tournament created ✅");
       setForm((f) => ({ ...f, name: "" }));
-      // jump into it
       navigate(`/tournaments/${encodeURIComponent(created.id)}`);
     } catch (e2) {
       setErr(String(e2?.message || e2));
@@ -160,9 +150,7 @@ export default function Tournaments() {
           </div>
 
           {!loggedIn ? (
-            <div className="mt-4 text-sm text-white/70">
-              Please login to create and view tournaments.
-            </div>
+            <div className="mt-4 text-sm text-white/70">Please login to create and view tournaments.</div>
           ) : (
             <form onSubmit={createTournament} className="mt-4 space-y-3">
               <div>
@@ -209,9 +197,7 @@ export default function Tournaments() {
                 {loading ? "Creating..." : "Create Tournament"}
               </button>
 
-              <div className="text-xs text-white/60">
-                Tip: You can keep only 1 tournament active at a time later (admin rule).
-              </div>
+              <div className="text-xs text-white/60">Click a tournament to add / view matches inside it.</div>
             </form>
           )}
         </div>
@@ -251,12 +237,6 @@ export default function Tournaments() {
               ))
             )}
           </div>
-
-          {loggedIn && (
-            <div className="mt-4 text-xs text-white/60">
-              Click a tournament to add / view matches inside it.
-            </div>
-          )}
         </div>
       </div>
     </div>

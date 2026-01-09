@@ -3,10 +3,6 @@ import { useNavigate, useParams } from "react-router-dom";
 import { isLoggedIn, getUserEmail } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 
-function classNames(...xs) {
-  return xs.filter(Boolean).join(" ");
-}
-
 function trim(v) {
   return String(v || "").trim();
 }
@@ -86,7 +82,6 @@ export default function TournamentDetails() {
   }));
 
   useEffect(() => {
-    // Keep P1 synced to email prefix when email changes
     setForm((f) => ({
       ...f,
       singlesP1: trim(f.singlesP1) ? f.singlesP1 : emailPrefix(email),
@@ -103,16 +98,13 @@ export default function TournamentDetails() {
       setMatches([]);
       return;
     }
-
-    if (!id) {
-      setErr("Missing tournament id.");
-      return;
-    }
+    if (!id) return setErr("Missing tournament id.");
 
     setLoading(true);
     try {
-      const tRes = await api.getTournament(id); // { item }
-      setTournament(tRes?.item || null);
+      // ✅ Lambda returns tournament item directly (NOT { item })
+      const tItem = await api.getTournament(id);
+      setTournament(tItem || null);
 
       const mRes = await api.listTournamentMatches(id); // { items: [] }
       setMatches(mRes?.items || []);
@@ -136,7 +128,11 @@ export default function TournamentDetails() {
   const sorted = useMemo(() => {
     return (matches || [])
       .slice()
-      .sort((a, b) => (String(b.date) + String(b.createdAt)).localeCompare(String(a.date) + String(a.createdAt)));
+      .sort((a, b) =>
+        (String(b.date || "") + String(b.createdAt || "")).localeCompare(
+          String(a.date || "") + String(a.createdAt || "")
+        )
+      );
   }, [matches]);
 
   const preview = useMemo(() => {
@@ -160,7 +156,6 @@ export default function TournamentDetails() {
       date: trim(form.date),
       court: form.court,
       gameType: form.gameType,
-
       matchup,
       winner,
       scoreA: Number(form.scoreA),
@@ -170,12 +165,11 @@ export default function TournamentDetails() {
 
     setLoading(true);
     try {
+      // ✅ Lambda route: POST /tournaments/{id}/matches returns match item directly
       const created = await api.createTournamentMatch(id, payload);
       setMatches((prev) => [created, ...(prev || [])]);
-
       setMsg("Match added ✅");
 
-      // Clear non-owner fields (keep p1)
       setForm((f) => ({
         ...f,
         date: "",
@@ -199,9 +193,7 @@ export default function TournamentDetails() {
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-white/5 to-emerald-500/15 p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-2xl font-semibold">
-              {tournament?.name || "Tournament"}
-            </div>
+            <div className="text-2xl font-semibold">{tournament?.name || "Tournament"}</div>
             <div className="text-sm text-white/70 mt-1">
               {tournament?.startDate || "—"} → {tournament?.endDate || "—"} •{" "}
               <span className="font-semibold">{String(tournament?.status || "ACTIVE")}</span>
@@ -381,12 +373,12 @@ export default function TournamentDetails() {
               </button>
 
               <div className="text-xs text-white/60">
-                This creates a match item linked to tournament: <span className="font-semibold">{id}</span>
+                Saves match under tournament: <span className="font-semibold">{id}</span>
               </div>
             </form>
           </div>
 
-          {/* Match list */}
+          {/* Matches */}
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Tournament matches</div>
@@ -408,20 +400,16 @@ export default function TournamentDetails() {
                       <span className="font-semibold">{m.winner || "—"}</span>
                     </div>
                     {m.ownerDisplayName ? (
-                      <div className="text-xs text-white/50 mt-1">
-                        Added by: {m.ownerDisplayName}
-                      </div>
+                      <div className="text-xs text-white/50 mt-1">Added by: {m.ownerDisplayName}</div>
                     ) : null}
-                    {m.notes ? (
-                      <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div>
-                    ) : null}
+                    {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
                   </div>
                 ))
               )}
             </div>
 
             <div className="mt-4 text-xs text-white/60">
-              Later: add standings + admin delete for any match.
+              Next: standings + admin delete inside tournament.
             </div>
           </div>
         </div>

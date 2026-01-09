@@ -1,6 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { CalendarDays, Home, Menu, Swords, User, X, Users } from "lucide-react";
+import {
+  CalendarDays,
+  Home,
+  Menu,
+  Swords,
+  User,
+  X,
+  Users,
+  Trophy,
+} from "lucide-react";
 
 import logo from "../assets/paddlehubs-logo.png";
 import { loginUrl, logoutUrl, isLoggedIn, getUserEmail, clearAuth } from "../lib/auth.js";
@@ -42,7 +51,6 @@ export default function Layout() {
       const dn = (me?.displayName || "").trim();
       setDisplayName(dn || fallback);
     } catch {
-      // If API fails, still show something sane
       setDisplayName(fallback);
     }
   }
@@ -66,13 +74,18 @@ export default function Layout() {
     setOpen(false);
   }, [location.pathname]);
 
+  // ✅ Changes:
+  // - Club Activity is PUBLIC (so anyone can view it)
+  // - Added Tournaments (protected)
   const nav = useMemo(
     () => [
       { to: "/", label: "Dashboard", icon: Home, public: true },
+      { to: "/club-activity", label: "Club Activity", icon: Users, public: true },
+
       { to: "/court-booking", label: "Court Booking", icon: CalendarDays, public: false },
       { to: "/match-details", label: "Match Details", icon: Swords, public: false },
+      { to: "/tournaments", label: "Tournaments", icon: Trophy, public: false },
       { to: "/profile", label: "My Profile", icon: User, public: false },
-      { to: "/club-activity", label: "Club Activity", icon: Users, public: false },
     ],
     []
   );
@@ -162,9 +175,7 @@ export default function Layout() {
                       className={({ isActive }) =>
                         classNames(
                           "flex items-center gap-3 rounded-2xl px-3 py-3 border",
-                          isActive
-                            ? "bg-white/15 border-white/25"
-                            : "bg-white/5 border-white/10 hover:bg-white/10"
+                          isActive ? "bg-white/15 border-white/25" : "bg-white/5 border-white/10 hover:bg-white/10"
                         )
                       }
                     >
@@ -212,9 +223,7 @@ export default function Layout() {
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-sm font-semibold">PaddleHubs</div>
-              <div className="text-xs text-white/70 mt-1">
-                Court bookings • Match tracking • Club hub
-              </div>
+              <div className="text-xs text-white/70 mt-1">Court bookings • Match tracking • Club hub</div>
             </div>
           </div>
         </aside>

@@ -1,3 +1,4 @@
+// /opt/paddlehubs-site/src/components/Layout.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
@@ -9,6 +10,7 @@ import {
   X,
   Users,
   Trophy,
+  BarChart3,
 } from "lucide-react";
 
 import logo from "../assets/paddlehubs-logo.png";
@@ -75,12 +77,14 @@ export default function Layout() {
   }, [location.pathname]);
 
   // ✅ Changes:
-  // - Club Activity is PUBLIC (so anyone can view it)
-  // - Added Tournaments (protected)
+  // - Rankings is PUBLIC
+  // - Club Activity is PUBLIC
+  // - Tournaments is protected
   const nav = useMemo(
     () => [
       { to: "/", label: "Dashboard", icon: Home, public: true },
       { to: "/club-activity", label: "Club Activity", icon: Users, public: true },
+      { to: "/rankings", label: "Rankings", icon: BarChart3, public: true }, // ✅ added
 
       { to: "/court-booking", label: "Court Booking", icon: CalendarDays, public: false },
       { to: "/match-details", label: "Match Details", icon: Swords, public: false },
@@ -185,8 +189,6 @@ export default function Layout() {
                   );
                 })}
             </nav>
-
-            {/* Founder block removed */}
           </div>
         </div>
       )}

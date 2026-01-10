@@ -2,39 +2,122 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { isLoggedIn } from "../lib/auth.js";
 import { api } from "../lib/api.js";
-import { Medal } from "lucide-react";
+import fireworksGif from "../assets/fireworks.gif";
+
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
-/* ---------------- MEDAL HELPERS ---------------- */
+// ---------- Lock helpers (UTC date-only) ----------
+function dateOnlyUTC(d) {
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return null;
+  return new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()));
+}
 
-function medalClass(rank) {
-  if (rank === 1) return "text-yellow-400";
-  if (rank === 2) return "text-slate-300";
-  if (rank === 3) return "text-amber-600";
+function isTournamentLocked(t) {
+  if (!t) return false;
+
+  const st = String(t.status || "ACTIVE").toUpperCase();
+  if (st !== "ACTIVE") return true;
+
+  if (!t.endDate) return false;
+  const end = dateOnlyUTC(t.endDate);
+  if (!end) return false;
+
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  return end < todayUTC;
+}
+
+function medalForRank(rank) {
+  if (rank === 1) return "🥇";
+  if (rank === 2) return "🥈";
+  if (rank === 3) return "🥉";
   return "";
 }
 
-function championRowClass(rank) {
-  if (rank === 1) {
-    return "bg-gradient-to-r from-yellow-500/20 via-amber-400/15 to-yellow-500/20 ring-2 ring-yellow-400/40 shadow-lg shadow-yellow-500/20";
+const PODIUM_GIF = fireworksGif;
+
+function PodiumCard({ standings }) {
+  const top3 = (standings || []).slice().sort((a, b) => (a.rank || 999) - (b.rank || 999)).slice(0, 3);
+  if (!top3.length) return null;
+
+  const first = top3.find((x) => x.rank === 1) || top3[0];
+  const second = top3.find((x) => x.rank === 2) || top3[1];
+  const third = top3.find((x) => x.rank === 3) || top3[2];
+
+  function PodiumSpot({ item, label, medal, accent }) {
+    if (!item) {
+      return (
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="text-xs text-white/60">{label}</div>
+          <div className="mt-1 text-sm text-white/60">—</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className={classNames("rounded-2xl border p-4", accent)}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-white/70">{label}</div>
+          <div className="text-lg">{medal}</div>
+        </div>
+
+        <div className="mt-1 font-semibold">{item.teamName}</div>
+
+        {(item.players || []).length ? (
+          <div className="mt-1 text-[11px] text-white/60">{item.players.join(", ")}</div>
+        ) : null}
+
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <span className="text-white/60">Points</span>
+          <span className="font-semibold">{item.points}</span>
+        </div>
+      </div>
+    );
   }
-  if (rank <= 3) return "bg-white/5";
-  return "";
-}
 
-function MedalIcon({ rank, size = 16 }) {
-  if (rank > 3) return null;
   return (
-    <span className={classNames("inline-flex", medalClass(rank))}>
-      <Medal size={size} />
-    </span>
+    <div className="mt-4 rounded-3xl border border-white/10 bg-white/5 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="font-semibold">🏆 Podium — Top 3</div>
+          <div className="text-xs text-white/60 mt-1">Top teams so far (updates automatically).</div>
+        </div>
+
+        <img
+          src={PODIUM_GIF}
+          alt="podium gif"
+          className="h-16 w-16 rounded-2xl border border-white/10 object-cover"
+          loading="lazy"
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <PodiumSpot
+          item={first}
+          label="Champion"
+          medal="🥇"
+          accent="bg-gradient-to-br from-yellow-400/20 via-white/5 to-amber-400/15 border-yellow-400/25"
+        />
+        <PodiumSpot
+          item={second}
+          label="Runner-up"
+          medal="🥈"
+          accent="bg-gradient-to-br from-slate-200/15 via-white/5 to-slate-400/10 border-white/15"
+        />
+        <PodiumSpot
+          item={third}
+          label="3rd Place"
+          medal="🥉"
+          accent="bg-gradient-to-br from-orange-500/15 via-white/5 to-amber-700/10 border-orange-400/15"
+        />
+      </div>
+    </div>
   );
 }
-
-/* ---------------- COMPONENT ---------------- */
 
 export default function Rankings() {
   const loggedIn = isLoggedIn();
@@ -43,12 +126,17 @@ export default function Rankings() {
   const [tournaments, setTournaments] = useState([]);
   const [selected, setSelected] = useState(null);
   const [standings, setStandings] = useState([]);
+
   const [err, setErr] = useState("");
 
   async function loadTournaments() {
     setErr("");
-    if (!loggedIn) return;
-
+    if (!loggedIn) {
+      setTournaments([]);
+      setSelected(null);
+      setStandings([]);
+      return;
+    }
     setLoading(true);
     try {
       const res = await api.listTournaments();
@@ -78,7 +166,7 @@ export default function Rankings() {
   }
 
   useEffect(() => {
-    if (loggedIn) loadTournaments();
+    loadTournaments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn]);
 
@@ -88,16 +176,13 @@ export default function Rankings() {
   }, [selected?.id]);
 
   const sortedStandings = useMemo(() => (standings || []).slice(), [standings]);
-
-  /* ---------------- UI ---------------- */
+  const selectedLocked = isTournamentLocked(selected);
 
   return (
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-white/5 to-cyan-500/15 p-6">
         <div className="text-2xl font-semibold">Tournament Rankings</div>
-        <div className="text-sm text-white/70 mt-1">
-          Select a tournament to view team standings.
-        </div>
+        <div className="text-sm text-white/70 mt-1">Select a tournament to view team standings.</div>
       </div>
 
       {err && (
@@ -112,7 +197,7 @@ export default function Rankings() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
-          {/* TOURNAMENT LIST */}
+          {/* Tournament list */}
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Tournaments</div>
@@ -125,12 +210,16 @@ export default function Rankings() {
               </button>
             </div>
 
-            <div className="mt-4 space-y-2">
-              {tournaments.length === 0 ? (
-                <div className="text-sm text-white/70">No tournaments yet.</div>
-              ) : (
-                tournaments.map((t) => {
+            {loading && tournaments.length === 0 ? (
+              <div className="mt-4 text-sm text-white/70">Loading...</div>
+            ) : tournaments.length === 0 ? (
+              <div className="mt-4 text-sm text-white/70">No tournaments yet.</div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {tournaments.map((t) => {
                   const active = selected?.id === t.id;
+                  const locked = isTournamentLocked(t);
+
                   return (
                     <button
                       key={t.id}
@@ -142,107 +231,140 @@ export default function Rankings() {
                           : "bg-white/5 border-white/10 hover:bg-white/10"
                       )}
                     >
-                      <div className="font-semibold">{t.name}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold">{t.name || "Tournament"}</div>
+
+                        {locked ? (
+                          <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-2 py-0.5 text-[10px] text-yellow-300">
+                            🔒 LOCKED
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                            LIVE
+                          </span>
+                        )}
+                      </div>
+
                       <div className="text-xs text-white/60 mt-1">
-                        {t.startDate} → {t.endDate}
+                        {t.startDate || "—"} → {t.endDate || "—"} • {t.status || "ACTIVE"}
                       </div>
                     </button>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            )}
           </div>
 
-          {/* STANDINGS TABLE */}
+          {/* Standings table */}
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
             <div className="flex items-center justify-between">
-              <div className="font-semibold">
-                {selected ? `Team Standings — ${selected.name}` : "Team Standings"}
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="font-semibold truncate">
+                  {selected?.name ? `Team Standings — ${selected.name}` : "Team Standings"}
+                </div>
+
+                {selected ? (
+                  selectedLocked ? (
+                    <span className="shrink-0 rounded-full border border-yellow-400/30 bg-yellow-400/10 px-2 py-0.5 text-[10px] text-yellow-300">
+                      Final (Locked)
+                    </span>
+                  ) : (
+                    <span className="shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                      Live
+                    </span>
+                  )
+                ) : null}
               </div>
+
               <div className="text-xs text-white/60">{sortedStandings.length}</div>
             </div>
 
-            {sortedStandings.length === 0 ? (
-              <div className="mt-4 text-sm text-white/70">
-                No teams or matches yet.
-              </div>
+            {!selected ? (
+              <div className="mt-4 text-sm text-white/70">Select a tournament.</div>
+            ) : loading && standings.length === 0 ? (
+              <div className="mt-4 text-sm text-white/70">Loading standings...</div>
+            ) : sortedStandings.length === 0 ? (
+              <div className="mt-4 text-sm text-white/70">No teams/matches yet for this tournament.</div>
             ) : (
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-xs text-white/60">
-                    <tr>
-                      <th className="text-left py-2 pr-2">#</th>
-                      <th className="text-left py-2 pr-2">Team</th>
-                      <th className="text-right py-2 px-2">Pts</th>
-                      <th className="text-right py-2 px-2">W</th>
-                      <th className="text-right py-2 px-2">L</th>
-                      <th className="text-right py-2 px-2">T</th>
-                      <th className="text-right py-2 px-2">PF</th>
-                      <th className="text-right py-2 pl-2">PA</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedStandings.map((r) => {
-                      const rk = r.rank;
-                      return (
-                        <tr
-                          key={r.teamId}
-                          className={classNames(
-                            "border-t border-white/10 transition",
-                            championRowClass(rk),
-                            rk === 1 ? "scale-[1.01]" : ""
-                          )}
-                        >
-                          <td className="py-2 pr-2 font-semibold">
-                            <span className="inline-flex items-center gap-2">
-                              {rk === 1 && <span className="text-yellow-300">👑</span>}
-                              {rk}
-                              <MedalIcon rank={rk} />
-                            </span>
-                          </td>
+              <>
+                {/* ✅ Podium Card */}
+                <PodiumCard standings={sortedStandings} />
 
-                          <td className="py-2 pr-2">
-                            <div
-                              className={classNames(
-                                "font-semibold flex items-center gap-2",
-                                rk === 1 ? "text-yellow-300" : ""
-                              )}
-                            >
-                              {rk <= 3 && (
-                                <span className={medalClass(rk)}>
-                                  <Medal size={18} />
-                                </span>
-                              )}
-                              <span>{r.teamName}</span>
-                              {rk === 1 && (
-                                <span className="ml-2 rounded-full bg-yellow-400/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-yellow-300 border border-yellow-400/30">
-                                  Champion
-                                </span>
-                              )}
-                            </div>
-                            {(r.players || []).length ? (
-                              <div className="text-[11px] text-white/60">
-                                {r.players.join(", ")}
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-xs text-white/60">
+                      <tr>
+                        <th className="text-left py-2 pr-2">#</th>
+                        <th className="text-left py-2 pr-2">Team</th>
+                        <th className="text-right py-2 px-2">Pts</th>
+                        <th className="text-right py-2 px-2">W</th>
+                        <th className="text-right py-2 px-2">L</th>
+                        <th className="text-right py-2 px-2">T</th>
+                        <th className="text-right py-2 px-2">PF</th>
+                        <th className="text-right py-2 pl-2">PA</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedStandings.map((r) => {
+                        const medal = medalForRank(r.rank);
+                        const isChampion = r.rank === 1;
+                        const isTop3 = r.rank <= 3;
+
+                        return (
+                          <tr
+                            key={r.teamId}
+                            className={classNames(
+                              "border-t border-white/10",
+                              isChampion
+                                ? "bg-gradient-to-r from-yellow-400/20 via-white/5 to-amber-400/15 ring-1 ring-yellow-400/30"
+                                : isTop3
+                                ? "bg-white/5"
+                                : ""
+                            )}
+                          >
+                            <td className="py-2 pr-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">{r.rank}</span>
+                                {medal ? <span className="text-base">{medal}</span> : null}
                               </div>
-                            ) : null}
-                          </td>
+                            </td>
 
-                          <td className="py-2 px-2 text-right font-semibold">{r.points}</td>
-                          <td className="py-2 px-2 text-right">{r.wins}</td>
-                          <td className="py-2 px-2 text-right">{r.losses}</td>
-                          <td className="py-2 px-2 text-right">{r.ties}</td>
-                          <td className="py-2 px-2 text-right">{r.pointsFor}</td>
-                          <td className="py-2 pl-2 text-right">{r.pointsAgainst}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            <td className="py-2 pr-2">
+                              <div className="flex items-center gap-2">
+                                <div className={classNames("font-semibold", isChampion ? "text-yellow-100" : "")}>
+                                  {r.teamName}
+                                </div>
+                                {isChampion ? (
+                                  <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-2 py-0.5 text-[10px] text-yellow-200">
+                                    🏆 Champion
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              {(r.players || []).length ? (
+                                <div className="text-[11px] text-white/60">{r.players.join(", ")}</div>
+                              ) : null}
+                            </td>
+
+                            <td className={classNames("py-2 px-2 text-right font-semibold", isChampion ? "text-yellow-100" : "")}>
+                              {r.points}
+                            </td>
+                            <td className="py-2 px-2 text-right">{r.wins}</td>
+                            <td className="py-2 px-2 text-right">{r.losses}</td>
+                            <td className="py-2 px-2 text-right">{r.ties}</td>
+                            <td className="py-2 px-2 text-right">{r.pointsFor}</td>
+                            <td className="py-2 pl-2 text-right">{r.pointsAgainst}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
 
             <div className="mt-3 text-xs text-white/60">
-              Points: Win=1 • Tie=0.5 • Loss=0
+              Points: Win={1}, Tie={0.5}, Loss={0} (MLP : WIN_POINTS / TIE_POINTS / LOSS_POINTS)
             </div>
           </div>
         </div>

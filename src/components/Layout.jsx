@@ -1,17 +1,7 @@
 // /opt/paddlehubs-site/src/components/Layout.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import {
-  CalendarDays,
-  Home,
-  Menu,
-  Swords,
-  User,
-  X,
-  Users,
-  Trophy,
-  BarChart3,
-} from "lucide-react";
+import { CalendarDays, Home, Menu, Swords, User, X, Users, Trophy, BarChart3 } from "lucide-react";
 
 import logo from "../assets/paddlehubs-logo.png";
 import { loginUrl, logoutUrl, isLoggedIn, getUserEmail, clearAuth } from "../lib/auth.js";
@@ -59,7 +49,7 @@ export default function Layout() {
 
     window.addEventListener("focus", sync);
     window.addEventListener("storage", sync);
-    window.addEventListener("ph_auth_changed", sync); // ✅ NEW: same-tab updates
+    window.addEventListener("ph_auth_changed", sync);
 
     refreshMe();
 
@@ -73,7 +63,6 @@ export default function Layout() {
 
   useEffect(() => {
     setOpen(false);
-    // Optional: keeps header state fresh when navigating
     refreshMe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
@@ -82,6 +71,8 @@ export default function Layout() {
     () => [
       { to: "/", label: "Dashboard", icon: Home, public: true },
       { to: "/club-activity", label: "Club Activity", icon: Users, public: true },
+
+      // ✅ Rankings is public now (App.jsx route is public too)
       { to: "/rankings", label: "Rankings", icon: BarChart3, public: true },
 
       { to: "/court-booking", label: "Court Booking", icon: CalendarDays, public: false },

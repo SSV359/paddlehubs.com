@@ -1,3 +1,4 @@
+// /opt/paddlehubs-site/src/pages/TournamentDetails.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isLoggedIn, getUserSub, isAdmin } from "../lib/auth.js";
@@ -6,7 +7,6 @@ import { api } from "../lib/api.js";
 function trim(v) {
   return String(v || "").trim();
 }
-
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
@@ -27,14 +27,12 @@ export default function TournamentDetails() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
 
-  // teams setup
   const [setup, setSetup] = useState({
     teamCount: 4,
     playersPerTeam: 2,
     teams: [],
   });
 
-  // match form (team-based)
   const [form, setForm] = useState({
     date: "",
     court: "Court 1",
@@ -63,12 +61,20 @@ export default function TournamentDetails() {
       setStandings([]);
       return;
     }
-    if (!id) return setErr("Missing tournament id.");
+    if (!id) {
+      setErr("Missing tournament id");
+      return;
+    }
 
     setLoading(true);
     try {
       const tRes = await api.getTournament(id);
-      setTournament(tRes || null);
+      if (!tRes?.id) {
+        setTournament(null);
+        setErr("Tournament not found");
+        return;
+      }
+      setTournament(tRes);
 
       const mRes = await api.listTournamentMatches(id);
       setMatches(mRes?.items || []);
@@ -76,26 +82,28 @@ export default function TournamentDetails() {
       const sRes = await api.getTournamentStandings(id);
       setStandings(sRes?.standings || []);
 
-      // init setup state if tournament has teamCount/playersPerTeam
-      setSetup((prev) => ({
-        ...prev,
-        teamCount: tRes?.teamCount || prev.teamCount,
-        playersPerTeam: tRes?.playersPerTeam || prev.playersPerTeam,
-        teams:
-          (tRes?.teams || []).length > 0
-            ? (tRes.teams || []).map((t) => ({
+      setSetup((prev) => {
+        const tc = Number(tRes?.teamCount || prev.teamCount || 4);
+        const pp = Number(tRes?.playersPerTeam || prev.playersPerTeam || 2);
+
+        const existing = Array.isArray(tRes?.teams) ? tRes.teams : [];
+        const teamsState =
+          existing.length > 0
+            ? existing.map((t) => ({
                 id: String(t.id),
                 name: t.name || "",
-                players: (t.players || []).slice(),
+                players: Array.isArray(t.players) ? t.players.slice() : [],
               }))
             : prev.teams.length > 0
             ? prev.teams
-            : Array.from({ length: Number(tRes?.teamCount || prev.teamCount) }, (_, i) => ({
+            : Array.from({ length: tc }, (_, i) => ({
                 id: "",
                 name: `Team ${i + 1}`,
-                players: Array.from({ length: Number(tRes?.playersPerTeam || prev.playersPerTeam) }, () => ""),
-              })),
-      }));
+                players: Array.from({ length: pp }, () => ""),
+              }));
+
+        return { ...prev, teamCount: tc, playersPerTeam: pp, teams: teamsState };
+      });
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
@@ -146,16 +154,12 @@ export default function TournamentDetails() {
   async function saveTeams() {
     setErr("");
     setMsg("");
-
     if (!canEditTournament) return setErr("Only tournament owner/admin can setup teams.");
-    if (!id) return;
-
-    const teamCount = Number(setup.teamCount);
-    const playersPerTeam = Number(setup.playersPerTeam);
+    if (!id) return setErr("Missing tournament id");
 
     const payload = {
-      teamCount,
-      playersPerTeam,
+      teamCount: Number(setup.teamCount),
+      playersPerTeam: Number(setup.playersPerTeam),
       teams: (setup.teams || []).map((t) => ({
         id: t.id || undefined,
         name: trim(t.name),
@@ -163,7 +167,6 @@ export default function TournamentDetails() {
       })),
     };
 
-    // basic validation UI-side
     if (!payload.teams.length) return setErr("Please add teams.");
     if (payload.teams.some((t) => !t.name)) return setErr("Each team must have a name.");
 
@@ -202,7 +205,6 @@ export default function TournamentDetails() {
 
     if (!loggedIn) return setErr("Please login.");
     if (!id) return setErr("Missing tournament id.");
-
     if (!trim(form.date)) return setErr("Date is required.");
     if (!form.teamAId || !form.teamBId) return setErr("Pick Team A and Team B.");
     if (form.teamAId === form.teamBId) return setErr("Team A and Team B must be different.");
@@ -213,7 +215,7 @@ export default function TournamentDetails() {
       gameType: form.gameType,
       teamAId: String(form.teamAId),
       teamBId: String(form.teamBId),
-      winnerTeamId: form.winnerTeamId ? String(form.winnerTeamId) : "", // can be empty -> inferred by scores
+      winnerTeamId: form.winnerTeamId ? String(form.winnerTeamId) : "",
       scoreA: Number(form.scoreA),
       scoreB: Number(form.scoreB),
       notes: trim(form.notes),
@@ -222,12 +224,16 @@ export default function TournamentDetails() {
     setLoading(true);
     try {
       const created = await api.createTournamentMatch(id, payload);
-      setMatches((prev) => [created, ...(prev || [])]);
+
+      // ✅ reload list from backend so you always see it
+      const mRes = await api.listTournamentMatches(id);
+      setMatches(mRes?.items || []);
 
       const sRes = await api.getTournamentStandings(id);
       setStandings(sRes?.standings || []);
 
       setMsg("Match added ✅");
+
       setForm((f) => ({
         ...f,
         date: "",
@@ -280,7 +286,9 @@ export default function TournamentDetails() {
     setLoading(true);
     try {
       await api.deleteTournamentMatch(id, matchId);
-      setMatches((prev) => (prev || []).filter((x) => x.id !== matchId));
+
+      const mRes = await api.listTournamentMatches(id);
+      setMatches(mRes?.items || []);
 
       const sRes = await api.getTournamentStandings(id);
       setStandings(sRes?.standings || []);
@@ -484,7 +492,7 @@ export default function TournamentDetails() {
                   </thead>
                   <tbody>
                     {standings.map((r) => (
-                      <tr key={r.teamId} className="border-t border-white/10">
+                      <tr key={r.teamId} className={classNames("border-t border-white/10", r.rank <= 3 ? "bg-white/5" : "")}>
                         <td className="py-2">{r.rank}</td>
                         <td className="py-2">
                           <div className="font-semibold">{r.teamName}</div>
@@ -506,7 +514,7 @@ export default function TournamentDetails() {
             )}
 
             <div className="mt-3 text-xs text-white/60">
-              Points: Win=2, Tie=1, Loss=0 (change in Lambda env: WIN_POINTS / TIE_POINTS / LOSS_POINTS)
+              Points: Win={2}, Tie={1}, Loss={0} (MLP: WIN_POINTS / TIE_POINTS / LOSS_POINTS)
             </div>
           </div>
 
@@ -670,19 +678,13 @@ export default function TournamentDetails() {
                             Score: {m.scoreA ?? "—"} - {m.scoreB ?? "—"} • Winner:{" "}
                             <span className="font-semibold">{m.winner || "—"}</span>
                           </div>
-                          {m.ownerDisplayName ? (
-                            <div className="text-xs text-white/50 mt-1">Added by: {m.ownerDisplayName}</div>
-                          ) : null}
                           {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
                         </div>
 
                         {canDeleteMatch(m) ? (
                           <button
                             onClick={() => onDeleteMatch(m.id)}
-                            className={classNames(
-                              "rounded-xl border px-2 py-1 text-[11px] disabled:opacity-40",
-                              "border-red-500/30 bg-red-500/10 hover:bg-red-500/15"
-                            )}
+                            className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-2 py-1 text-[11px] disabled:opacity-40"
                             disabled={loading}
                           >
                             Delete
@@ -694,9 +696,7 @@ export default function TournamentDetails() {
                 )}
               </div>
 
-              <div className="mt-4 text-xs text-white/60">
-                Standings update automatically when matches are added/deleted.
-              </div>
+              <div className="mt-4 text-xs text-white/60">Standings update automatically when matches are added/deleted.</div>
             </div>
           </div>
         </div>

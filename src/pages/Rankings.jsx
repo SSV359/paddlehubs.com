@@ -186,7 +186,7 @@ export default function Rankings() {
             )}
 
             <div className="mt-3 text-xs text-white/60">
-              Points: Win={2}, Tie={1}, Loss={0} (MLP : WIN_POINTS / TIE_POINTS / LOSS_POINTS)
+              Points: Win={1}, Tie={0.5}, Loss={0} (MLP : WIN_POINTS / TIE_POINTS / LOSS_POINTS)
             </div>
           </div>
         </div>

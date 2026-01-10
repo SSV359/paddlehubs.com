@@ -1,4 +1,3 @@
-// /opt/paddlehubs-site/src/lib/api.js
 import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
 
 const API_BASE_RAW = import.meta.env.VITE_API_BASE;
@@ -41,20 +40,18 @@ async function req(path, { method = "GET", body } = {}) {
 
   if (res.status === 401 || res.status === 403) {
     clearAuth();
-    const msg = data?.error || data?.message || "Unauthorized. Please login again.";
-    throw new Error(msg);
+    throw new Error(data?.error || data?.message || "Unauthorized. Please login again.");
   }
 
   if (!res.ok) {
-    const msg = data?.error || data?.message || `HTTP ${res.status}`;
-    throw new Error(msg);
+    throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
   }
 
   return data;
 }
 
 export const api = {
-  // -------- Profile --------
+  // Profile
   getMe() {
     return req("/me");
   },
@@ -62,12 +59,7 @@ export const api = {
     return req("/me", { method: "PUT", body: payload });
   },
 
-  // -------- Rankings --------
-  getRankings() {
-    return req("/rankings"); // { items: [...] }
-  },
-
-  // -------- Bookings --------
+  // Bookings
   listBookings() {
     return req("/bookings");
   },
@@ -78,7 +70,7 @@ export const api = {
     return req(`/bookings/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // -------- Matches --------
+  // Matches
   listMatches() {
     return req("/matches");
   },
@@ -89,7 +81,7 @@ export const api = {
     return req(`/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // -------- Club (shared) --------
+  // Club
   listClubBookings() {
     return req("/club/bookings");
   },
@@ -97,7 +89,7 @@ export const api = {
     return req("/club/matches");
   },
 
-  // -------- Admin (delete any booking/match) --------
+  // Admin
   adminDeleteBooking(id) {
     return req(`/admin/bookings/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
@@ -105,7 +97,7 @@ export const api = {
     return req(`/admin/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // -------- Tournaments --------
+  // Tournaments
   listTournaments() {
     return req("/tournaments");
   },
@@ -119,12 +111,20 @@ export const api = {
     return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // Tournament standings (computed)
+  // Tournament teams setup
+  updateTournamentTeams(tournamentId, payload) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/teams`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+
+  // Tournament standings
   getTournamentStandings(tournamentId) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/standings`);
   },
 
-  // -------- Tournament Matches --------
+  // Tournament matches
   listTournamentMatches(tournamentId) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches`);
   },

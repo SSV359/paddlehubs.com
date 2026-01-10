@@ -1,12 +1,22 @@
 // /opt/paddlehubs-site/src/lib/auth.js
+// Cognito Hosted UI (PKCE) + token storage + helpers for ID/access token + claim helpers
 
 const AUTH_KEY = "ph_auth";
 const PKCE_KEY = "ph_pkce_verifier";
+const AUTH_EVENT = "ph_auth_changed";
+
+function emitAuthChanged() {
+  try {
+    window.dispatchEvent(new Event(AUTH_EVENT));
+  } catch {}
+}
 
 /** ---------- Basic storage ---------- */
 export function setAuth(tokens) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(tokens));
+  emitAuthChanged(); // ✅ notify same-tab listeners
 }
+
 export function getAuth() {
   try {
     return JSON.parse(localStorage.getItem(AUTH_KEY)) || null;
@@ -14,10 +24,13 @@ export function getAuth() {
     return null;
   }
 }
+
 export function clearAuth() {
   localStorage.removeItem(AUTH_KEY);
   localStorage.removeItem(PKCE_KEY);
+  emitAuthChanged(); // ✅ notify same-tab listeners
 }
+
 export function isLoggedIn() {
   const a = getAuth();
   return !!(a?.access_token || a?.id_token);
@@ -28,6 +41,7 @@ export function getAccessToken() {
   const a = getAuth();
   return a?.access_token || "";
 }
+
 export function getIdToken() {
   const a = getAuth();
   return a?.id_token || "";
@@ -86,7 +100,7 @@ export function logoutUrl() {
   return `${domain}/logout?${params.toString()}`;
 }
 
-/** ---------- Token exchange ---------- */
+/** ---------- Token exchange on /auth/callback ---------- */
 export async function exchangeCodeForTokens(code) {
   const verifier = localStorage.getItem(PKCE_KEY);
   if (!verifier) throw new Error("Missing PKCE verifier. Start login again.");
@@ -138,12 +152,18 @@ function decodeClaims(token) {
   }
 }
 
+/**
+ * API Gateway JWT authorizer validates the ACCESS token.
+ * So prefer access token claims first; fallback to ID token claims.
+ */
 export function getUserClaims() {
   return decodeClaims(getAccessToken()) || decodeClaims(getIdToken());
 }
+
 export function getIdTokenClaims() {
   return decodeClaims(getIdToken());
 }
+
 export function getAccessTokenClaims() {
   return decodeClaims(getAccessToken());
 }
@@ -159,15 +179,19 @@ export function getUserSub() {
   return c?.sub || "";
 }
 
-export function getUserGroups() {
-  const c = getAccessTokenClaims() || {};
-  const g = c["cognito:groups"];
-  if (!g) return [];
-  if (Array.isArray(g)) return g;
-  return String(g).split(",").map((s) => s.trim()).filter(Boolean);
+export function isAdmin() {
+  try {
+    const payload = getAccessTokenClaims();
+    const groups = payload?.["cognito:groups"] || [];
+    return Array.isArray(groups) ? groups.includes("admins") : String(groups).includes("admins");
+  } catch {
+    return false;
+  }
 }
 
-export function isAdmin() {
-  return getUserGroups().includes("admins");
+/** Helpful for debugging */
+export function getTokenUse() {
+  const c = getAccessTokenClaims();
+  return c?.token_use || "";
 }
 

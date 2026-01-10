@@ -1,4 +1,3 @@
-// /opt/paddlehubs-site/src/pages/Tournaments.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isLoggedIn } from "../lib/auth.js";
@@ -25,8 +24,6 @@ function statusBadge(status) {
   return `${base} border-amber-400/30 bg-amber-500/10 text-amber-100`;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 export default function Tournaments() {
   const navigate = useNavigate();
   const loggedIn = isLoggedIn();
@@ -39,7 +36,13 @@ export default function Tournaments() {
 
   const [form, setForm] = useState(() => {
     const today = toISODate(new Date());
-    return { name: "", startDate: today, endDate: today };
+    return {
+      name: "",
+      startDate: today,
+      endDate: today,
+      teamCount: 4,
+      playersPerTeam: 2,
+    };
   });
 
   function onChange(e) {
@@ -57,7 +60,7 @@ export default function Tournaments() {
 
     setLoading(true);
     try {
-      const res = await api.listTournaments(); // { items: [] }
+      const res = await api.listTournaments();
       setItems(res?.items || []);
     } catch (e) {
       setErr(String(e?.message || e));
@@ -97,35 +100,25 @@ export default function Tournaments() {
     const name = String(form.name || "").trim();
     const startDate = String(form.startDate || "").trim();
     const endDate = String(form.endDate || "").trim();
+    const teamCount = Number(form.teamCount);
+    const playersPerTeam = Number(form.playersPerTeam);
 
     if (!name) return setErr("Tournament name is required.");
     if (!startDate) return setErr("Start date is required.");
     if (!endDate) return setErr("End date is required.");
     if (endDate < startDate) return setErr("End date cannot be before start date.");
+    if (!Number.isFinite(teamCount) || teamCount <= 0) return setErr("Team count must be valid.");
+    if (!Number.isFinite(playersPerTeam) || playersPerTeam <= 0) return setErr("Players per team must be valid.");
 
     setLoading(true);
     try {
-      const created = await api.createTournament({ name, startDate, endDate }); // returns item
+      const created = await api.createTournament({ name, startDate, endDate, teamCount, playersPerTeam });
       setItems((prev) => [created, ...(prev || [])]);
       setMsg("Tournament created ✅");
       setForm((f) => ({ ...f, name: "" }));
-
-      // Confirm it exists before navigating (prevents landing on cached/temporary 404)
-      try {
-        await api.getTournament(created.id);
-        navigate(`/tournaments/${encodeURIComponent(created.id)}`);
-      } catch {
-        // small retry (handles eventual consistency / caching edge cases)
-        await sleep(300);
-        await api.getTournament(created.id);
-        navigate(`/tournaments/${encodeURIComponent(created.id)}`);
-      }
+      navigate(`/tournaments/${encodeURIComponent(created.id)}`);
     } catch (e2) {
       setErr(String(e2?.message || e2));
-      // best-effort refresh list so UI stays accurate
-      try {
-        await load();
-      } catch {}
     } finally {
       setLoading(false);
     }
@@ -135,9 +128,7 @@ export default function Tournaments() {
     <div className="space-y-6">
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-amber-500/15 via-white/5 to-fuchsia-500/15 p-6">
         <div className="text-2xl font-semibold">Tournaments</div>
-        <div className="text-sm text-white/70 mt-1">
-          Create tournaments and log matches inside them.
-        </div>
+        <div className="text-sm text-white/70 mt-1">Create tournaments, setup teams, and track standings.</div>
       </div>
 
       {err && (
@@ -207,6 +198,35 @@ export default function Tournaments() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-white/60">How many teams?</label>
+                  <input
+                    type="number"
+                    name="teamCount"
+                    value={form.teamCount}
+                    onChange={onChange}
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    min={1}
+                    max={64}
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-white/60">Players per team</label>
+                  <input
+                    type="number"
+                    name="playersPerTeam"
+                    value={form.playersPerTeam}
+                    onChange={onChange}
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    min={1}
+                    max={20}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
               <button
                 className="w-full rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 py-2.5 font-semibold disabled:opacity-40"
                 disabled={!loggedIn || loading}
@@ -214,7 +234,9 @@ export default function Tournaments() {
                 {loading ? "Creating..." : "Create Tournament"}
               </button>
 
-              <div className="text-xs text-white/60">Click a tournament to add / view matches inside it.</div>
+              <div className="text-xs text-white/60">
+                After creation, you will setup team names + players inside tournament.
+              </div>
             </form>
           )}
         </div>
@@ -245,7 +267,8 @@ export default function Tournaments() {
                     <div>
                       <div className="font-semibold">{t.name || "Untitled"}</div>
                       <div className="text-xs text-white/60 mt-1">
-                        {t.startDate || "—"} → {t.endDate || "—"}
+                        {t.startDate || "—"} → {t.endDate || "—"} •{" "}
+                        {t.teamCount ? `${t.teamCount} teams` : "teams not set"}
                       </div>
                     </div>
                     <span className={statusBadge(t.status)}>{String(t.status || "ACTIVE")}</span>

@@ -1,73 +1,50 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+// /opt/paddlehubs-site/src/pages/AuthCallback.jsx
+import React, { useEffect, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { exchangeCodeForTokens } from "../lib/auth.js";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
-  const [error, setError] = useState("");
+  const location = useLocation();
+  const [err, setErr] = useState("");
 
   useEffect(() => {
-    let alive = true;
-
     async function run() {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
-      const err = params.get("error");
-
-      if (err) {
-        if (alive) setError(err);
-        return;
-      }
-
-      if (!code) {
-        if (alive) setError("Missing authorization code.");
-        return;
-      }
-
       try {
-        // Exchange code → tokens (PKCE)
+        const params = new URLSearchParams(location.search);
+        const code = params.get("code");
+        const error = params.get("error");
+        const errorDesc = params.get("error_description");
+
+        if (error) throw new Error(errorDesc || error);
+        if (!code) throw new Error("Missing code in callback URL.");
+
         await exchangeCodeForTokens(code);
 
-        // Clean up the URL (remove ?code=...)
-        window.history.replaceState({}, document.title, "/");
-
-        // Redirect back to originally requested page (or dashboard)
-        const target =
-          sessionStorage.getItem("ph_post_login_redirect") || "/";
-        sessionStorage.removeItem("ph_post_login_redirect");
-
-        if (alive) {
-          navigate(target, { replace: true });
-        }
+        // ✅ Land on rankings after successful login
+        navigate("/rankings", { replace: true });
       } catch (e) {
-        if (alive) {
-          setError(e.message || "Login failed");
-        }
+        setErr(String(e?.message || e));
       }
     }
 
     run();
-
-    return () => {
-      alive = false;
-    };
-  }, [navigate]);
+  }, [location.search, navigate]);
 
   return (
-    <div className="min-h-[60vh] flex items-center justify-center text-white">
-      {error ? (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-6 py-4 max-w-md text-center">
-          <div className="font-semibold text-lg">Authentication Error</div>
-          <div className="text-sm mt-2 opacity-90">{error}</div>
-          <div className="text-xs mt-4 opacity-70">
-            Please try logging in again.
+    <div className="mx-auto max-w-xl p-6">
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white">
+        <div className="text-xl font-semibold">Signing you in…</div>
+        <div className="text-sm text-white/70 mt-2">
+          Please wait while we finish login.
+        </div>
+
+        {err ? (
+          <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {err}
           </div>
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
-          Signing you in…
-        </div>
-      )}
+        ) : null}
+      </div>
     </div>
   );
 }

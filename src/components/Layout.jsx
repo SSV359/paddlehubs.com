@@ -32,7 +32,6 @@ export default function Layout() {
 
   const location = useLocation();
 
-  // Load display name from backend (/me). Fallback to email prefix.
   async function refreshMe() {
     const li = isLoggedIn();
     setLoggedIn(li);
@@ -44,12 +43,10 @@ export default function Layout() {
 
     const email = getUserEmail();
     const fallback = emailPrefix(email);
-
-    // show fallback immediately while backend fetch happens
     setDisplayName((prev) => prev || fallback);
 
     try {
-      const me = await api.getMe(); // GET /me
+      const me = await api.getMe();
       const dn = (me?.displayName || "").trim();
       setDisplayName(dn || fallback);
     } catch {
@@ -62,29 +59,30 @@ export default function Layout() {
 
     window.addEventListener("focus", sync);
     window.addEventListener("storage", sync);
+    window.addEventListener("ph_auth_changed", sync); // ✅ NEW: same-tab updates
 
     refreshMe();
 
     return () => {
       window.removeEventListener("focus", sync);
       window.removeEventListener("storage", sync);
+      window.removeEventListener("ph_auth_changed", sync);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     setOpen(false);
+    // Optional: keeps header state fresh when navigating
+    refreshMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
-  // ✅ Changes:
-  // - Rankings is PUBLIC
-  // - Club Activity is PUBLIC
-  // - Tournaments is protected
   const nav = useMemo(
     () => [
       { to: "/", label: "Dashboard", icon: Home, public: true },
       { to: "/club-activity", label: "Club Activity", icon: Users, public: true },
-      { to: "/rankings", label: "Rankings", icon: BarChart3, public: true }, // ✅ added
+      { to: "/rankings", label: "Rankings", icon: BarChart3, public: true },
 
       { to: "/court-booking", label: "Court Booking", icon: CalendarDays, public: false },
       { to: "/match-details", label: "Match Details", icon: Swords, public: false },
@@ -96,7 +94,6 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-slate-950 to-fuchsia-950 text-white">
-      {/* Top bar */}
       <div className="sticky top-0 z-40 backdrop-blur bg-white/5 border-b border-white/10">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
           <button
@@ -107,7 +104,6 @@ export default function Layout() {
             <Menu size={18} />
           </button>
 
-          {/* Brand */}
           <div className="flex items-center gap-3">
             <img src={logo} alt="PaddleHubs" className="h-10 w-10 rounded-xl object-contain" />
             <div className="leading-tight">
@@ -116,7 +112,6 @@ export default function Layout() {
             </div>
           </div>
 
-          {/* Login / Logout */}
           <div className="ml-auto flex items-center gap-2">
             {loggedIn ? (
               <>
@@ -151,7 +146,6 @@ export default function Layout() {
         </div>
       </div>
 
-      {/* Mobile drawer */}
       {open && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setOpen(false)} />
@@ -193,9 +187,7 @@ export default function Layout() {
         </div>
       )}
 
-      {/* Desktop layout */}
       <div className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
-        {/* Sidebar */}
         <aside className="hidden md:block">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
             <nav className="space-y-2">
@@ -230,7 +222,6 @@ export default function Layout() {
           </div>
         </aside>
 
-        {/* Main */}
         <main className="min-w-0">
           <Outlet />
           <footer className="mt-8 text-xs text-white/50">

@@ -1,7 +1,13 @@
+// /opt/paddlehubs-site/src/lib/api.js
 import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
 
 const API_BASE_RAW = import.meta.env.VITE_API_BASE;
 
+/**
+ * Normalize base so it never ends with "/"
+ * Recommended .env:
+ *   VITE_API_BASE=https://kkz5s0g014.execute-api.us-east-1.amazonaws.com/prod
+ */
 function normalizeBase(base) {
   if (!base) return "";
   return base.replace(/\/+$/, "");
@@ -11,12 +17,15 @@ const API_BASE = normalizeBase(API_BASE_RAW);
 
 function authHeader() {
   const a = getAuth();
+  // API Gateway JWT authorizer validates ACCESS token
   const token = a?.access_token || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function req(path, { method = "GET", body } = {}) {
   if (!API_BASE) throw new Error("Missing VITE_API_BASE in .env");
+
+  // client-side enforcement for protected endpoints
   if (!isLoggedIn()) throw new Error("Not logged in");
 
   const url = `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
@@ -38,20 +47,26 @@ async function req(path, { method = "GET", body } = {}) {
     data = { raw: text };
   }
 
+  // Auth failures: clear stored tokens so UI forces fresh login
   if (res.status === 401 || res.status === 403) {
     clearAuth();
-    throw new Error(data?.error || data?.message || "Unauthorized. Please login again.");
+    const msg =
+      data?.error ||
+      data?.message ||
+      "Unauthorized. Please login again (token expired).";
+    throw new Error(msg);
   }
 
   if (!res.ok) {
-    throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+    const msg = data?.error || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
 
   return data;
 }
 
 export const api = {
-  // Profile
+  // -------- Profile --------
   getMe() {
     return req("/me");
   },
@@ -59,7 +74,12 @@ export const api = {
     return req("/me", { method: "PUT", body: payload });
   },
 
-  // Bookings
+  // -------- Rankings (tournament list + top3) --------
+  getRankings(limit = 30) {
+    return req(`/rankings?limit=${encodeURIComponent(limit)}`);
+  },
+
+  // -------- Bookings --------
   listBookings() {
     return req("/bookings");
   },
@@ -70,7 +90,7 @@ export const api = {
     return req(`/bookings/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // Matches
+  // -------- Matches --------
   listMatches() {
     return req("/matches");
   },
@@ -81,7 +101,7 @@ export const api = {
     return req(`/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // Club
+  // -------- Club (shared) --------
   listClubBookings() {
     return req("/club/bookings");
   },
@@ -89,7 +109,7 @@ export const api = {
     return req("/club/matches");
   },
 
-  // Admin
+  // -------- Admin (delete any booking/match) --------
   adminDeleteBooking(id) {
     return req(`/admin/bookings/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
@@ -97,7 +117,7 @@ export const api = {
     return req(`/admin/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // Tournaments
+  // -------- Tournaments --------
   listTournaments() {
     return req("/tournaments");
   },
@@ -111,20 +131,12 @@ export const api = {
     return req(`/tournaments/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  // Tournament teams setup
-  updateTournamentTeams(tournamentId, payload) {
-    return req(`/tournaments/${encodeURIComponent(tournamentId)}/teams`, {
-      method: "PUT",
-      body: payload,
-    });
-  },
-
-  // Tournament standings
+  // ✅ Tournament standings
   getTournamentStandings(tournamentId) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/standings`);
   },
 
-  // Tournament matches
+  // -------- Tournament Matches --------
   listTournamentMatches(tournamentId) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches`);
   },

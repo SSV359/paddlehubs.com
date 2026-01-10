@@ -11,6 +11,14 @@ function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
+// ✅ medals for top 3
+function medalForRank(rank) {
+  if (rank === 1) return "🥇";
+  if (rank === 2) return "🥈";
+  if (rank === 3) return "🥉";
+  return "";
+}
+
 export default function TournamentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -223,7 +231,7 @@ export default function TournamentDetails() {
 
     setLoading(true);
     try {
-      const created = await api.createTournamentMatch(id, payload);
+      await api.createTournamentMatch(id, payload);
 
       // ✅ reload list from backend so you always see it
       const mRes = await api.listTournamentMatches(id);
@@ -305,7 +313,9 @@ export default function TournamentDetails() {
     return (matches || [])
       .slice()
       .sort((a, b) =>
-        (String(b.date || "") + String(b.createdAt || "")).localeCompare(String(a.date || "") + String(a.createdAt || ""))
+        (String(b.date || "") + String(b.createdAt || "")).localeCompare(
+          String(a.date || "") + String(a.createdAt || "")
+        )
       );
   }, [matches]);
 
@@ -492,10 +502,23 @@ export default function TournamentDetails() {
                   </thead>
                   <tbody>
                     {standings.map((r) => (
-                      <tr key={r.teamId} className={classNames("border-t border-white/10", r.rank <= 3 ? "bg-white/5" : "")}>
-                        <td className="py-2">{r.rank}</td>
+                      <tr
+                        key={r.teamId}
+                        className={classNames("border-t border-white/10", r.rank <= 3 ? "bg-white/5" : "")}
+                      >
+                        {/* ✅ medal + rank */}
                         <td className="py-2">
-                          <div className="font-semibold">{r.teamName}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 text-center">{medalForRank(r.rank)}</span>
+                            <span>{r.rank}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-2">
+                          <div className="font-semibold">
+                            {r.teamName}
+                            {r.rank <= 3 ? <span className="ml-2 text-xs text-white/60">Winner</span> : null}
+                          </div>
                           {(r.players || []).length ? (
                             <div className="text-[11px] text-white/60">{r.players.join(", ")}</div>
                           ) : null}

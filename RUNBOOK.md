@@ -140,35 +140,52 @@ A team with no saved roster shows a prompt to save teams first. Picking
 fewer than the required number, or the same player twice on one side, is
 blocked client-side and server-side with a clear error message.
 
-### Round-robin match schedule (saved, editable)
+### Weekly match schedule (saved, editable, holiday-aware)
 
-A "Match Schedule" section on the Tournament page generates a full
-round-robin plan from that tournament's saved teams — every team plays
-every other team exactly once, scaling to however many teams exist (odd
-counts get a "bye" each round automatically). This is genuinely
+A "Match Schedule" section on the Tournament page generates a **week-by-
+week plan** across the tournament's full run (e.g. a 3-month tournament
+gets ~13 weekly entries), built from a round-robin cycle of that
+tournament's saved teams. One round-robin round is assigned per week;
+if there are more weeks than rounds, the cycle repeats — normal for a
+season longer than one full round-robin. This is genuinely
 per-tournament and dynamic: it reads `tournament.teams` at generation
-time, nothing is hardcoded to any specific team count.
+time, nothing is hardcoded to any specific team or week count.
 
+- **Holiday weeks**: any week can be marked "skip" — it's excluded from
+  the round-robin assignment (that round rolls to the next non-skipped
+  week) and shows a "Holiday — skipped" badge instead of fixtures.
+  Toggling skip and clicking Generate again reassigns rounds around it
+  without losing other weeks' skip flags.
+- **Each week is its own collapsible table** — expand/collapse per week
+  (`expandedWeeks` state client-side), so a long season doesn't render
+  as one giant page. Recently-generated schedules default to the last
+  few weeks expanded, older ones collapsed.
+- **Team lineups are set once, not per fixture**: a "Team Lineups" panel
+  lets you pick each team's players a single time; every fixture for
+  that team, in every week, reads from this same shared value. Changing
+  a team's lineup updates every week's display immediately.
 - **Format**: "Normal" (1 game per fixture) or "MLP style" (4 games per
   fixture) — sets the default `gamesPlayed` for generated fixtures.
 - **Persisted separately from real matches**: stored as its own DynamoDB
-  item (`TSCHEDULE#{tournamentId}`) via `GET`/`PUT
-  /tournaments/{id}/schedule` — a schedule is a *plan*, not a `TMATCH`
-  record. Generating or editing it never creates real matches.
-- **Editable per fixture**: court, games count, and the actual players
-  (from each team's saved roster) can be set inline in the schedule
-  table, then persisted with **Save Schedule**. Same owner/admin
-  authorization as team setup (`updateTournamentTeams` pattern).
-- **"Use" button**: loads a fixture's teams/court/date/players straight
+  item (`TSCHEDULE#{tournamentId}`) with a `weeks[]` array via
+  `GET`/`PUT`/`DELETE /tournaments/{id}/schedule` — a schedule is a
+  *plan*, not `TMATCH` records. Generating or editing it never creates
+  real matches.
+- **Delete**: "Delete Schedule" removes the entire saved plan (with a
+  confirmation prompt) — for when something's gone wrong and you want
+  to start over. "Remove week" and per-fixture "Remove" prune smaller
+  mistakes locally before the next Save.
+- **"Use" button**: loads one fixture's teams/court/date/lineup straight
   into the existing Add Match form, so recording the real result still
   goes through the exact same validated flow (player requirements,
   games-won winner logic, etc.) as adding a match manually.
 
-**New API Gateway routes needed** (same authorizer-attachment step as
-every other route added in this project): `GET
-/tournaments/{id}/schedule` and `PUT /tournaments/{id}/schedule`, both
-with the `paddlehubs-cognito-jwt` authorizer attached and deployed to
-your stage.
+**API Gateway routes needed** (same authorizer-attachment step as every
+other route added in this project): `GET`, `PUT`, and `DELETE
+/tournaments/{id}/schedule`, all three with the `paddlehubs-cognito-jwt`
+authorizer attached and deployed to your stage. If you built this
+feature before the weekly restructure, no new routes are needed — the
+data shape changed (`rounds[]` → `weeks[]`) but the routes are the same.
 
 ## 6. Feature: Registered Users (Admin)
 

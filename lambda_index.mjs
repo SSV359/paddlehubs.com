@@ -533,7 +533,7 @@ async function updateTournamentTeams({ sub }, isAdmin, tournamentId, body) {
   return updated?.item || null;
 }
 
-// ---------- MATCH SCHEDULE (round-robin plan, saved separately from actual matches) ----------
+// ---------- MATCH SCHEDULE (weekly plan across the tournament, saved separately from actual matches) ----------
 function scheduleSk(tournamentId) {
   return `TSCHEDULE#${tournamentId}`;
 }
@@ -545,7 +545,7 @@ async function getTournamentSchedule(tournamentId) {
       Key: { clubId: CLUB_ID, sk: scheduleSk(tournamentId) },
     })
   );
-  return { rounds: res.Item?.rounds || [], updatedAt: res.Item?.updatedAt || null };
+  return { weeks: res.Item?.weeks || [], updatedAt: res.Item?.updatedAt || null };
 }
 
 async function saveTournamentSchedule({ sub }, isAdmin, tournamentId, body) {
@@ -558,43 +558,47 @@ async function saveTournamentSchedule({ sub }, isAdmin, tournamentId, body) {
   const teams = Array.isArray(t.teams) ? t.teams : [];
   const teamIds = new Set(teams.map((x) => String(x.id)));
 
-  const roundsIn = Array.isArray(body.rounds) ? body.rounds : [];
-  if (!roundsIn.length) return { error: "Provide rounds[]" };
+  const weeksIn = Array.isArray(body.weeks) ? body.weeks : [];
+  if (!weeksIn.length) return { error: "Provide weeks[]" };
 
-  const rounds = [];
-  for (const r of roundsIn) {
-    const round = Number(r.round);
-    const date = trim(r.date);
-    const fixturesIn = Array.isArray(r.fixtures) ? r.fixtures : [];
+  const weeks = [];
+  for (const w of weeksIn) {
+    const week = Number(w.week);
+    const date = trim(w.date);
+    const skipped = !!w.skipped;
+    const fixturesIn = Array.isArray(w.fixtures) ? w.fixtures : [];
 
-    if (!Number.isFinite(round) || round < 1) return { error: "Each round needs a valid round number" };
+    if (!Number.isFinite(week) || week < 1) return { error: "Each week needs a valid week number" };
 
+    // A skipped (holiday) week can have zero fixtures — that's the point.
     const fixtures = [];
-    for (const f of fixturesIn) {
-      const teamAId = trim(f.teamAId);
-      const teamBId = trim(f.teamBId);
-      if (!teamAId || !teamBId) return { error: "Each fixture needs teamAId and teamBId" };
-      if (!teamIds.has(teamAId) || !teamIds.has(teamBId)) {
-        return { error: "Fixture references a team not on this tournament's roster" };
+    if (!skipped) {
+      for (const f of fixturesIn) {
+        const teamAId = trim(f.teamAId);
+        const teamBId = trim(f.teamBId);
+        if (!teamAId || !teamBId) return { error: `Week ${week}: each fixture needs teamAId and teamBId` };
+        if (!teamIds.has(teamAId) || !teamIds.has(teamBId)) {
+          return { error: `Week ${week}: fixture references a team not on this tournament's roster` };
+        }
+
+        const gamesPlayed = Math.min(6, Math.max(1, Math.round(Number(f.gamesPlayed ?? 1)) || 1));
+        const teamAPlayers = (Array.isArray(f.teamAPlayers) ? f.teamAPlayers : []).map((p) => trim(p)).filter(Boolean);
+        const teamBPlayers = (Array.isArray(f.teamBPlayers) ? f.teamBPlayers : []).map((p) => trim(p)).filter(Boolean);
+
+        fixtures.push({
+          teamAId,
+          teamBId,
+          court: trim(f.court) || "Court 1",
+          gameType: f.gameType === "singles" ? "singles" : "doubles",
+          gamesPlayed,
+          teamAPlayers,
+          teamBPlayers,
+          matchId: f.matchId ? String(f.matchId) : "", // set once a real match is recorded from this fixture
+        });
       }
-
-      const gamesPlayed = Math.min(6, Math.max(1, Math.round(Number(f.gamesPlayed ?? 1)) || 1));
-      const teamAPlayers = (Array.isArray(f.teamAPlayers) ? f.teamAPlayers : []).map((p) => trim(p)).filter(Boolean);
-      const teamBPlayers = (Array.isArray(f.teamBPlayers) ? f.teamBPlayers : []).map((p) => trim(p)).filter(Boolean);
-
-      fixtures.push({
-        teamAId,
-        teamBId,
-        court: trim(f.court) || "Court 1",
-        gameType: f.gameType === "singles" ? "singles" : "doubles",
-        gamesPlayed,
-        teamAPlayers,
-        teamBPlayers,
-        matchId: f.matchId ? String(f.matchId) : "", // set once a real match is recorded from this fixture
-      });
     }
 
-    rounds.push({ round, date, fixtures });
+    weeks.push({ week, date, skipped, fixtures });
   }
 
   const now = new Date().toISOString();
@@ -607,14 +611,31 @@ async function saveTournamentSchedule({ sub }, isAdmin, tournamentId, body) {
         sk: scheduleSk(tournamentId),
         type: "TSCHEDULE",
         tournamentId,
-        rounds,
+        weeks,
         updatedBySub: sub,
         updatedAt: now,
       },
     })
   );
 
-  return { rounds, updatedAt: now };
+  return { weeks, updatedAt: now };
+}
+
+async function deleteTournamentSchedule({ sub }, isAdmin, tournamentId) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found", statusCode: 404 };
+  const t = rec.item;
+
+  if (!isAdmin && t.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  await ddb.send(
+    new DeleteCommand({
+      TableName: EVENTS_TABLE,
+      Key: { clubId: CLUB_ID, sk: scheduleSk(tournamentId) },
+    })
+  );
+
+  return { ok: true };
 }
 
 async function deleteTournamentAuthorized({ sub }, isAdmin, tournamentId) {
@@ -1265,6 +1286,16 @@ export async function handler(event) {
       if (!id) return json(400, { error: "Missing tournament id" });
 
       const r = await saveTournamentSchedule({ sub: user.sub }, admin, id, body);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+
+      return json(200, r);
+    }
+
+    if (routeKey === "DELETE /tournaments/{id}/schedule") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const r = await deleteTournamentSchedule({ sub: user.sub }, admin, id);
       if (r?.error) return json(r.statusCode || 400, { error: r.error });
 
       return json(200, r);

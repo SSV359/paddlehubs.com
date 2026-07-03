@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isLoggedIn, getUserSub, isAdmin } from "../lib/auth.js";
 import { api } from "../lib/api.js";
+import { Pill } from "../components/ui.jsx";
 
 function trim(v) {
   return String(v || "").trim();
@@ -111,14 +112,17 @@ export default function TournamentDetails() {
   const [scheduleOpen, setScheduleOpen] = useState(true);
   const [matchesOpen, setMatchesOpen] = useState(true);
 
-  // Round-robin schedule generator
+  // Weekly schedule generator — one round-robin round per week, cycling
+  // back to round 1 if there are more weeks than rounds (a season-long
+  // tournament naturally plays the same round-robin more than once).
   const [scheduleForm, setScheduleForm] = useState({
     startDate: "",
+    weeksCount: 3,
     format: "normal", // "normal" | "mlp"
     gameType: "doubles",
-    spread: "daily", // "daily" (one round per day) | "sameday" (all on start date)
   });
-  const [schedule, setSchedule] = useState([]); // array of rounds -> array of fixtures
+  const [schedule, setSchedule] = useState([]); // array of weeks -> { week, date, skipped, fixtures }
+  const [expandedWeeks, setExpandedWeeks] = useState({}); // { [week]: bool }
 
   // Matches table: text filter + sort direction
   const [matchQuery, setMatchQuery] = useState("");
@@ -183,7 +187,29 @@ export default function TournamentDetails() {
 
       try {
         const schedRes = await api.getTournamentSchedule(id);
-        setSchedule(Array.isArray(schedRes?.rounds) ? schedRes.rounds : []);
+        const weeks = Array.isArray(schedRes?.weeks) ? schedRes.weeks : [];
+        setSchedule(weeks);
+
+        // Default the start date to the tournament's own start date, but
+        // only if the admin hasn't already typed something in. Weeks
+        // count stays at whatever the form already has (default 3) —
+        // no auto-scaling from the tournament's date range.
+        if (tRes?.startDate) {
+          setScheduleForm((f) => ({
+            ...f,
+            startDate: f.startDate || tRes.startDate,
+          }));
+        }
+
+        // Collapse older/likely-completed weeks by default so a long season
+        // doesn't render as one giant page — expand recent/upcoming ones.
+        if (weeks.length) {
+          const expanded = {};
+          weeks.forEach((w) => {
+            expanded[w.week] = w.week >= weeks.length - 2; // last 3 weeks open
+          });
+          setExpandedWeeks(expanded);
+        }
       } catch (e) {
         // Non-fatal — schedule is a bonus feature, don't block the rest of the page.
         console.error("Schedule failed to load:", e);
@@ -364,49 +390,100 @@ export default function TournamentDetails() {
     setScheduleForm((f) => ({ ...f, [name]: value }));
   }
 
+  // Builds/rebuilds the full weekly plan. Every non-skipped week gets the
+  // COMPLETE round-robin — every team plays every other team once, every
+  // week — repeating the same full cycle each week for the whole season.
+  // Existing skip flags are preserved across a rebuild, so toggling a
+  // holiday week and regenerating doesn't lose it.
   function buildSchedule() {
     if (!teamsReady) return setErr("Save teams first, then generate a schedule.");
     if (teams.length < 2) return setErr("Need at least 2 teams to build a schedule.");
 
     const rounds = generateRoundRobin(teams);
+    if (!rounds.length) return setErr("Not enough teams to generate any rounds.");
+    const allPairs = rounds.flat(); // every matchup in the round-robin, combined
+
     const start = trim(scheduleForm.startDate) || new Date().toISOString().slice(0, 10);
+    const weeksCount = Math.max(1, Math.min(52, Math.round(Number(scheduleForm.weeksCount)) || 1));
     const gameType = scheduleForm.gameType;
     const gamesPlayed = scheduleForm.format === "mlp" ? 4 : 1;
     const perSide = gameType === "singles" ? 1 : 2;
 
-    const built = rounds.map((pairs, roundIdx) => {
-      const date = scheduleForm.spread === "sameday" ? start : addDays(start, roundIdx);
-      return {
-        round: roundIdx + 1,
-        date,
-        fixtures: pairs.map((p, i) => ({
-          teamAId: p.teamA.id,
-          teamBId: p.teamB.id,
-          court: SCHEDULE_COURTS[i % SCHEDULE_COURTS.length],
-          gameType,
-          gamesPlayed,
-          teamAPlayers: resizePlayers([], perSide),
-          teamBPlayers: resizePlayers([], perSide),
-        })),
-      };
+    const prevSkips = {};
+    schedule.forEach((w) => {
+      prevSkips[w.week] = w.skipped;
     });
 
-    setSchedule(built);
-    setMsg(`Schedule generated: ${rounds.length} round${rounds.length > 1 ? "s" : ""}. Remember to Save it.`);
+    const weeks = [];
+    for (let w = 1; w <= weeksCount; w++) {
+      const date = addDays(start, (w - 1) * 7);
+      const skipped = !!prevSkips[w];
+      const fixtures = skipped
+        ? []
+        : allPairs.map((p, i) => ({
+            teamAId: p.teamA.id,
+            teamBId: p.teamB.id,
+            court: SCHEDULE_COURTS[i % SCHEDULE_COURTS.length],
+            gameType,
+            gamesPlayed,
+            // Player pairings are per-fixture (i.e. per team, per week) on
+            // purpose — the same team can send a different pair each week.
+            teamAPlayers: resizePlayers([], perSide),
+            teamBPlayers: resizePlayers([], perSide),
+          }));
+
+      weeks.push({ week: w, date, skipped, fixtures });
+    }
+
+    setSchedule(weeks);
+    setExpandedWeeks((prev) => {
+      const next = { ...prev };
+      weeks.forEach((w) => {
+        if (next[w.week] === undefined) next[w.week] = w.week >= weeksCount - 2;
+      });
+      return next;
+    });
+    setMsg(`Schedule generated: ${weeksCount} week${weeksCount > 1 ? "s" : ""}, full round-robin each week. Pick players per week below, then Save.`);
   }
 
-  function updateFixture(roundIdx, fxIdx, patch) {
+  function toggleWeekSkip(weekIdx) {
     setSchedule((prev) => {
-      const next = prev.map((r) => ({ ...r, fixtures: r.fixtures.map((f) => ({ ...f })) }));
-      next[roundIdx].fixtures[fxIdx] = { ...next[roundIdx].fixtures[fxIdx], ...patch };
+      const next = prev.map((w) => ({ ...w }));
+      next[weekIdx].skipped = !next[weekIdx].skipped;
+      // Skipping a week clears its fixtures; un-skipping leaves it empty
+      // until the next "Generate Schedule" reassigns a round to it.
+      if (next[weekIdx].skipped) next[weekIdx].fixtures = [];
       return next;
     });
   }
 
-  function setFixturePlayer(roundIdx, fxIdx, side, playerIdx, value) {
+  function toggleWeekExpanded(week) {
+    setExpandedWeeks((prev) => ({ ...prev, [week]: !prev[week] }));
+  }
+
+  function setWeekDate(weekIdx, value) {
     setSchedule((prev) => {
-      const next = prev.map((r) => ({ ...r, fixtures: r.fixtures.map((f) => ({ ...f })) }));
-      const fx = next[roundIdx].fixtures[fxIdx];
+      const next = prev.map((w) => ({ ...w }));
+      next[weekIdx].date = value;
+      return next;
+    });
+  }
+
+  function updateFixture(weekIdx, fxIdx, patch) {
+    setSchedule((prev) => {
+      const next = prev.map((w) => ({ ...w, fixtures: w.fixtures.map((f) => ({ ...f })) }));
+      next[weekIdx].fixtures[fxIdx] = { ...next[weekIdx].fixtures[fxIdx], ...patch };
+      return next;
+    });
+  }
+
+  // Sets one player on one specific fixture (one team, one week) — pairings
+  // are intentionally per-week, since the same team can send a different
+  // pair from week to week.
+  function setFixturePlayer(weekIdx, fxIdx, side, playerIdx, value) {
+    setSchedule((prev) => {
+      const next = prev.map((w) => ({ ...w, fixtures: w.fixtures.map((f) => ({ ...f })) }));
+      const fx = next[weekIdx].fixtures[fxIdx];
       const key = side === "A" ? "teamAPlayers" : "teamBPlayers";
       const perSide = fx.gameType === "singles" ? 1 : 2;
       const arr = resizePlayers(fx[key], perSide).slice();
@@ -425,10 +502,11 @@ export default function TournamentDetails() {
     setLoading(true);
     try {
       const payload = {
-        rounds: schedule.map((r) => ({
-          round: r.round,
-          date: r.date,
-          fixtures: r.fixtures.map((f) => ({
+        weeks: schedule.map((w) => ({
+          week: w.week,
+          date: w.date,
+          skipped: !!w.skipped,
+          fixtures: (w.fixtures || []).map((f) => ({
             teamAId: f.teamAId,
             teamBId: f.teamBId,
             court: f.court,
@@ -440,13 +518,50 @@ export default function TournamentDetails() {
         })),
       };
       const res = await api.saveTournamentSchedule(id, payload);
-      setSchedule(Array.isArray(res?.rounds) ? res.rounds : schedule);
+      setSchedule(Array.isArray(res?.weeks) ? res.weeks : schedule);
       setMsg("Schedule saved ✅");
     } catch (e) {
       setErr(String(e?.message || e));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function deleteSchedule() {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can delete the schedule.");
+
+    const ok = confirm("Delete the entire saved schedule? This can't be undone — you'd need to regenerate it.");
+    if (!ok) return;
+
+    setErr("");
+    setMsg("");
+    setLoading(true);
+    try {
+      await api.deleteTournamentSchedule(id);
+      setSchedule([]);
+      setMsg("Schedule deleted.");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Removes a single fixture locally (e.g. a bad pairing/typo) without
+  // touching anything already saved — click Save Schedule afterward to
+  // persist the change.
+  function removeFixture(weekIdx, fxIdx) {
+    setSchedule((prev) => {
+      const next = prev.map((w) => ({ ...w, fixtures: w.fixtures.slice() }));
+      next[weekIdx].fixtures.splice(fxIdx, 1);
+      return next;
+    });
+  }
+
+  // Removes an entire week from the local plan (e.g. a week added by
+  // mistake). Click Save Schedule afterward to persist the change.
+  function removeWeek(weekIdx) {
+    setSchedule((prev) => prev.filter((_, i) => i !== weekIdx));
   }
 
   // Sends one fixture straight into the Add Match form, pre-filled
@@ -903,28 +1018,40 @@ export default function TournamentDetails() {
             )}
           </div>
 
-          {/* Match Schedule — round-robin generator */}
+          {/* Match Schedule — weekly plan across the tournament, with holiday-skip support */}
           <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <SectionHeader
               title="Match Schedule"
               open={scheduleOpen}
               onToggle={() => setScheduleOpen((v) => !v)}
-              count={schedule.reduce((n, r) => n + r.fixtures.length, 0) || null}
+              count={schedule.length || null}
             />
 
             {scheduleOpen && (
               <>
                 {!teamsReady ? (
-                  <div className="mt-4 text-sm text-muted">Save teams first, then generate a round-robin schedule.</div>
+                  <div className="mt-4 text-sm text-muted">Save teams first, then generate a weekly schedule.</div>
                 ) : (
                   <>
                     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       <div>
-                        <label className="text-xs text-muted">Start date</label>
+                        <label className="text-xs text-muted">Start date (Week 1)</label>
                         <input
                           type="date"
                           name="startDate"
                           value={scheduleForm.startDate}
+                          onChange={onScheduleFormChange}
+                          className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted"># Weeks</label>
+                        <input
+                          type="number"
+                          name="weeksCount"
+                          min={1}
+                          max={52}
+                          value={scheduleForm.weeksCount}
                           onChange={onScheduleFormChange}
                           className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                         />
@@ -953,25 +1080,12 @@ export default function TournamentDetails() {
                           <option value="singles">Singles</option>
                         </select>
                       </div>
-                      <div>
-                        <label className="text-xs text-muted">Spread rounds</label>
-                        <select
-                          name="spread"
-                          value={scheduleForm.spread}
-                          onChange={onScheduleFormChange}
-                          className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
-                        >
-                          <option value="daily">One round per day</option>
-                          <option value="sameday">All on start date</option>
-                        </select>
-                      </div>
                     </div>
 
                     <div className="mt-3 text-xs text-muted">
                       {teams.length} teams → each plays {Math.max(teams.length - 1, 0)} opponent
-                      {teams.length - 1 === 1 ? "" : "s"} once (round robin), across{" "}
-                      {teams.length % 2 === 0 ? teams.length - 1 : teams.length} round
-                      {(teams.length % 2 === 0 ? teams.length - 1 : teams.length) === 1 ? "" : "s"}.
+                      {teams.length - 1 === 1 ? "" : "s"} — the full round-robin repeats every week. Mark a week as
+                      holiday to skip it entirely.
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -994,151 +1108,239 @@ export default function TournamentDetails() {
                         </button>
                       )}
 
+                      {schedule.length > 0 && canEditTournament && (
+                        <button
+                          type="button"
+                          onClick={deleteSchedule}
+                          disabled={loading}
+                          className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-500/15 disabled:opacity-40 dark:text-red-300"
+                        >
+                          Delete Schedule
+                        </button>
+                      )}
+
                       {!canEditTournament && schedule.length > 0 && (
                         <span className="text-xs text-muted">Only the tournament owner/admin can edit or save.</span>
                       )}
                     </div>
 
                     {schedule.length > 0 && (
-                      <div className="mt-4 overflow-x-auto rounded-xl border border-line">
-                        <table className="w-full min-w-[900px] text-sm">
-                          <thead className="bg-surface2 text-xs uppercase tracking-wide text-muted">
-                            <tr>
-                              <th className="whitespace-nowrap py-2.5 pl-3 text-left">Round</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Date</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Court</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Team A</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Team A players</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Team B</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Team B players</th>
-                              <th className="whitespace-nowrap py-2.5 text-left">Games</th>
-                              <th className="whitespace-nowrap py-2.5 pr-3 text-right">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {schedule.map((round, roundIdx) =>
-                              round.fixtures.map((fx, fxIdx) => {
-                                const teamA = teamsById.get(String(fx.teamAId));
-                                const teamB = teamsById.get(String(fx.teamBId));
-                                const perSide = fx.gameType === "singles" ? 1 : 2;
-                                const rosterA = teamA?.players || [];
-                                const rosterB = teamB?.players || [];
+                      <div className="mt-4 space-y-3">
+                        {schedule.map((week, weekIdx) => {
+                          const isOpen = !!expandedWeeks[week.week];
+                          return (
+                            <div key={week.week} className="rounded-xl border border-line bg-surface2">
+                              <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleWeekExpanded(week.week)}
+                                    className="flex items-center gap-2 text-left"
+                                  >
+                                    <span
+                                      className={classNames(
+                                        "inline-block text-muted transition-transform duration-150",
+                                        isOpen ? "rotate-90" : "rotate-0"
+                                      )}
+                                    >
+                                      ▶
+                                    </span>
+                                    <span className="text-sm font-semibold">Week {week.week}</span>
+                                  </button>
 
-                                return (
-                                  <tr key={`${roundIdx}-${fxIdx}`} className="border-t border-line align-top">
-                                    {fxIdx === 0 && (
-                                      <td
-                                        className="whitespace-nowrap py-2.5 pl-3 font-semibold"
-                                        rowSpan={round.fixtures.length}
-                                      >
-                                        {round.round}
-                                      </td>
-                                    )}
-                                    {fxIdx === 0 && (
-                                      <td className="whitespace-nowrap py-2.5 text-muted" rowSpan={round.fixtures.length}>
-                                        {round.date}
-                                      </td>
-                                    )}
-                                    <td className="py-2.5">
-                                      {canEditTournament ? (
-                                        <select
-                                          value={fx.court}
-                                          onChange={(e) => updateFixture(roundIdx, fxIdx, { court: e.target.value })}
-                                          className="rounded-lg border border-line bg-surface2 px-2 py-1 text-xs"
-                                        >
-                                          {SCHEDULE_COURTS.map((c) => (
-                                            <option key={c} value={c}>
-                                              {c}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      ) : (
-                                        fx.court
-                                      )}
-                                    </td>
-                                    <td className="py-2.5 font-medium">{teamA?.name || "—"}</td>
-                                    <td className="py-2.5">
-                                      <div className="flex flex-col gap-1">
-                                        {Array.from({ length: perSide }).map((_, pIdx) => (
-                                          <select
-                                            key={pIdx}
-                                            value={fx.teamAPlayers?.[pIdx] || ""}
-                                            onChange={(e) => setFixturePlayer(roundIdx, fxIdx, "A", pIdx, e.target.value)}
-                                            disabled={!canEditTournament}
-                                            className="min-w-[120px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
-                                          >
-                                            <option value="">{rosterA.length ? `Player ${pIdx + 1}` : "No roster"}</option>
-                                            {rosterA.map((p) => (
-                                              <option key={p} value={p}>
-                                                {p}
-                                              </option>
-                                            ))}
-                                          </select>
-                                        ))}
-                                      </div>
-                                    </td>
-                                    <td className="py-2.5 font-medium">{teamB?.name || "—"}</td>
-                                    <td className="py-2.5">
-                                      <div className="flex flex-col gap-1">
-                                        {Array.from({ length: perSide }).map((_, pIdx) => (
-                                          <select
-                                            key={pIdx}
-                                            value={fx.teamBPlayers?.[pIdx] || ""}
-                                            onChange={(e) => setFixturePlayer(roundIdx, fxIdx, "B", pIdx, e.target.value)}
-                                            disabled={!canEditTournament}
-                                            className="min-w-[120px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
-                                          >
-                                            <option value="">{rosterB.length ? `Player ${pIdx + 1}` : "No roster"}</option>
-                                            {rosterB.map((p) => (
-                                              <option key={p} value={p}>
-                                                {p}
-                                              </option>
-                                            ))}
-                                          </select>
-                                        ))}
-                                      </div>
-                                    </td>
-                                    <td className="py-2.5">
-                                      {canEditTournament ? (
-                                        <select
-                                          value={fx.gamesPlayed}
-                                          onChange={(e) =>
-                                            updateFixture(roundIdx, fxIdx, { gamesPlayed: Number(e.target.value) })
-                                          }
-                                          className="rounded-lg border border-line bg-surface2 px-2 py-1 text-xs"
-                                        >
-                                          {[1, 2, 3, 4, 5, 6].map((n) => (
-                                            <option key={n} value={n}>
-                                              {n}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      ) : (
-                                        fx.gamesPlayed
-                                      )}
-                                    </td>
-                                    <td className="whitespace-nowrap py-2.5 pr-3 text-right">
-                                      <button
-                                        type="button"
-                                        onClick={() => useFixture(fx, round.date)}
-                                        className="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs font-medium transition hover:bg-line"
-                                      >
-                                        Use
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })
-                            )}
-                          </tbody>
-                        </table>
+                                  {canEditTournament ? (
+                                    <input
+                                      type="date"
+                                      value={week.date || ""}
+                                      onChange={(e) => setWeekDate(weekIdx, e.target.value)}
+                                      className="rounded-lg border border-line bg-surface px-2 py-1 text-xs"
+                                    />
+                                  ) : (
+                                    <span className="text-xs text-muted">{week.date}</span>
+                                  )}
+
+                                  {week.skipped && <Pill tone="danger">Holiday — skipped</Pill>}
+                                  {!week.skipped && (
+                                    <span className="text-xs text-muted">
+                                      {week.fixtures.length} match{week.fixtures.length === 1 ? "" : "es"}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {canEditTournament && (
+                                  <div className="flex items-center gap-2">
+                                    <label className="flex items-center gap-1.5 text-xs text-muted">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!week.skipped}
+                                        onChange={() => toggleWeekSkip(weekIdx)}
+                                      />
+                                      Holiday (skip)
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeWeek(weekIdx)}
+                                      className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
+                                    >
+                                      Remove week
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {isOpen && !week.skipped && week.fixtures.length > 0 && (
+                                <div className="overflow-x-auto border-t border-line">
+                                  <table className="w-full min-w-[720px] text-sm">
+                                    <thead className="text-xs uppercase tracking-wide text-muted">
+                                      <tr>
+                                        <th className="whitespace-nowrap py-2 pl-3 text-left">Court</th>
+                                        <th className="whitespace-nowrap py-2 text-left">Team A</th>
+                                        <th className="whitespace-nowrap py-2 text-left">Team A players</th>
+                                        <th className="whitespace-nowrap py-2 text-left">Team B</th>
+                                        <th className="whitespace-nowrap py-2 text-left">Team B players</th>
+                                        <th className="whitespace-nowrap py-2 text-left">Games</th>
+                                        <th className="whitespace-nowrap py-2 pr-3 text-right">Action</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {week.fixtures.map((fx, fxIdx) => {
+                                        const teamA = teamsById.get(String(fx.teamAId));
+                                        const teamB = teamsById.get(String(fx.teamBId));
+                                        const perSide = fx.gameType === "singles" ? 1 : 2;
+                                        const rosterA = teamA?.players || [];
+                                        const rosterB = teamB?.players || [];
+                                        return (
+                                          <tr key={fxIdx} className="border-t border-line bg-surface align-top">
+                                            <td className="py-2 pl-3">
+                                              {canEditTournament ? (
+                                                <select
+                                                  value={fx.court}
+                                                  onChange={(e) =>
+                                                    updateFixture(weekIdx, fxIdx, { court: e.target.value })
+                                                  }
+                                                  className="rounded-lg border border-line bg-surface2 px-2 py-1 text-xs"
+                                                >
+                                                  {SCHEDULE_COURTS.map((c) => (
+                                                    <option key={c} value={c}>
+                                                      {c}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              ) : (
+                                                fx.court
+                                              )}
+                                            </td>
+                                            <td className="py-2 font-medium">{teamA?.name || "—"}</td>
+                                            <td className="py-2">
+                                              <div className="flex flex-col gap-1">
+                                                {Array.from({ length: perSide }).map((_, pIdx) => (
+                                                  <select
+                                                    key={pIdx}
+                                                    value={fx.teamAPlayers?.[pIdx] || ""}
+                                                    onChange={(e) =>
+                                                      setFixturePlayer(weekIdx, fxIdx, "A", pIdx, e.target.value)
+                                                    }
+                                                    disabled={!canEditTournament}
+                                                    className="min-w-[120px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
+                                                  >
+                                                    <option value="">
+                                                      {rosterA.length ? `Player ${pIdx + 1}` : "No roster"}
+                                                    </option>
+                                                    {rosterA.map((p) => (
+                                                      <option key={p} value={p}>
+                                                        {p}
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                ))}
+                                              </div>
+                                            </td>
+                                            <td className="py-2 font-medium">{teamB?.name || "—"}</td>
+                                            <td className="py-2">
+                                              <div className="flex flex-col gap-1">
+                                                {Array.from({ length: perSide }).map((_, pIdx) => (
+                                                  <select
+                                                    key={pIdx}
+                                                    value={fx.teamBPlayers?.[pIdx] || ""}
+                                                    onChange={(e) =>
+                                                      setFixturePlayer(weekIdx, fxIdx, "B", pIdx, e.target.value)
+                                                    }
+                                                    disabled={!canEditTournament}
+                                                    className="min-w-[120px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
+                                                  >
+                                                    <option value="">
+                                                      {rosterB.length ? `Player ${pIdx + 1}` : "No roster"}
+                                                    </option>
+                                                    {rosterB.map((p) => (
+                                                      <option key={p} value={p}>
+                                                        {p}
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                ))}
+                                              </div>
+                                            </td>
+                                            <td className="py-2">
+                                              {canEditTournament ? (
+                                                <select
+                                                  value={fx.gamesPlayed}
+                                                  onChange={(e) =>
+                                                    updateFixture(weekIdx, fxIdx, {
+                                                      gamesPlayed: Number(e.target.value),
+                                                    })
+                                                  }
+                                                  className="rounded-lg border border-line bg-surface2 px-2 py-1 text-xs"
+                                                >
+                                                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                                                    <option key={n} value={n}>
+                                                      {n}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              ) : (
+                                                fx.gamesPlayed
+                                              )}
+                                            </td>
+                                            <td className="whitespace-nowrap py-2 pr-3 text-right">
+                                              <div className="flex justify-end gap-1.5">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => useFixture(fx, week.date)}
+                                                  className="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs font-medium transition hover:bg-line"
+                                                >
+                                                  Use
+                                                </button>
+                                                {canEditTournament && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => removeFixture(weekIdx, fxIdx)}
+                                                    title="Remove this fixture from the week"
+                                                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
+                                                  >
+                                                    Remove
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
                     {schedule.length > 0 && (
                       <div className="mt-3 text-xs text-muted">
-                        Assign players per fixture above, then <strong>Save Schedule</strong> to keep it — or click{" "}
-                        <strong>Use</strong> on any row to load it into Add Match below and record the real result.
+                        Set players per fixture in each week (they can differ week to week), mark any holiday weeks
+                        to skip them, then{" "}
+                        <strong>Save Schedule</strong> to keep it all — or click <strong>Use</strong> on any fixture
+                        to load it into Add Match below and record the real result.
                       </div>
                     )}
                   </>

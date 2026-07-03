@@ -148,6 +148,9 @@ export const api = {
       body: payload,
     });
   },
+  deleteTournamentSchedule(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/schedule`, { method: "DELETE" });
+  },
 
   // Player rankings
   getPlayerRankings() {

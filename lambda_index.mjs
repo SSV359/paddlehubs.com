@@ -128,9 +128,23 @@ async function getMe({ sub }) {
     })
   );
 
-  if (res.Item) return res.Item;
-
   const now = new Date().toISOString();
+
+  if (res.Item) {
+    // Piggyback on this already-frequent call (fired on load/focus/nav)
+    // to keep a lightweight "last seen" timestamp, used for the admin
+    // "who's online" view. No new endpoint needed for this.
+    await ddb.send(
+      new UpdateCommand({
+        TableName: PLAYERS_TABLE,
+        Key: { clubId: CLUB_ID, userSub: sub },
+        UpdateExpression: "SET lastActiveAt = :n",
+        ExpressionAttributeValues: { ":n": now },
+      })
+    );
+    return { ...res.Item, lastActiveAt: now };
+  }
+
   const item = {
     clubId: CLUB_ID,
     userSub: sub,
@@ -138,6 +152,7 @@ async function getMe({ sub }) {
     displayName: "",
     createdAt: now,
     updatedAt: now,
+    lastActiveAt: now,
   };
 
   await ddb.send(new PutCommand({ TableName: PLAYERS_TABLE, Item: item }));
@@ -483,6 +498,18 @@ async function createTournament({ sub, email }, body) {
   return item;
 }
 
+// Fallback palette assigned by team position when no color has been set
+// yet — so every team always has a distinct color, never an "undefined" one.
+const DEFAULT_TEAM_COLORS = [
+  "#E4572E", "#1C4E80", "#2F9E44", "#F2B705", "#8338EC", "#E63980",
+  "#0FA3B1", "#B5651D", "#6C757D", "#D62828", "#3A86FF", "#2A9D8F",
+];
+
+function sanitizeHexColor(value, fallback) {
+  const s = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
+}
+
 async function updateTournamentTeams({ sub }, isAdmin, tournamentId, body) {
   const rec = await getTournamentRecord(tournamentId);
   if (!rec) return { error: "Tournament not found", statusCode: 404 };
@@ -505,8 +532,9 @@ async function updateTournamentTeams({ sub }, isAdmin, tournamentId, body) {
       .map((p) => trim(p))
       .filter(Boolean)
       .slice(0, playersPerTeam);
+    const color = sanitizeHexColor(x.color, DEFAULT_TEAM_COLORS[idx % DEFAULT_TEAM_COLORS.length]);
 
-    return { id, name, players };
+    return { id, name, players, color };
   });
 
   if (!teams.length) return { error: "Please provide teams[]" };
@@ -869,6 +897,7 @@ async function computeStandings(tournamentId) {
       teamId: String(team.id),
       teamName: team.name || "Team",
       players: Array.isArray(team.players) ? team.players : [],
+      color: team.color || "",
       points: 0,
       wins: 0,
       losses: 0,
@@ -1115,24 +1144,148 @@ async function listAdminUsernames() {
   return new Set(usernames);
 }
 
+const ONLINE_WINDOW_MS = 5 * 60 * 1000; // "online now" = active in the last 5 minutes
+
+async function listAllPlayerActivity() {
+  const res = await ddb.send(
+    new QueryCommand({
+      TableName: PLAYERS_TABLE,
+      KeyConditionExpression: "clubId = :c",
+      ExpressionAttributeValues: { ":c": CLUB_ID },
+    })
+  );
+  const map = new Map();
+  for (const item of res.Items || []) {
+    map.set(item.userSub, {
+      displayName: item.displayName || "",
+      lastActiveAt: item.lastActiveAt || "",
+    });
+  }
+  return map;
+}
+
 async function getRegisteredUsers() {
-  const [rawUsers, adminUsernames] = await Promise.all([listAllCognitoUsers(), listAdminUsernames()]);
+  const [rawUsers, adminUsernames, activityMap] = await Promise.all([
+    listAllCognitoUsers(),
+    listAdminUsernames(),
+    listAllPlayerActivity(),
+  ]);
 
-  const users = rawUsers.map((u) => ({
-    username: u.Username,
-    sub: cognitoAttr(u, "sub"),
-    email: cognitoAttr(u, "email"),
-    emailVerified: cognitoAttr(u, "email_verified") === "true",
-    status: u.UserStatus || "",
-    enabled: u.Enabled !== false,
-    createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : "",
-    lastModifiedAt: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : "",
-    isAdmin: adminUsernames.has(u.Username),
-  }));
+  const now = Date.now();
 
-  users.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const users = rawUsers.map((u) => {
+    const sub = cognitoAttr(u, "sub");
+    const activity = activityMap.get(sub);
+    const lastActiveAt = activity?.lastActiveAt || "";
+    const online = lastActiveAt ? now - new Date(lastActiveAt).getTime() < ONLINE_WINDOW_MS : false;
 
-  return { count: users.length, users };
+    return {
+      username: u.Username,
+      sub,
+      email: cognitoAttr(u, "email"),
+      emailVerified: cognitoAttr(u, "email_verified") === "true",
+      status: u.UserStatus || "",
+      enabled: u.Enabled !== false,
+      createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : "",
+      lastModifiedAt: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : "",
+      isAdmin: adminUsernames.has(u.Username),
+      displayName: activity?.displayName || "",
+      lastActiveAt,
+      online,
+    };
+  });
+
+  users.sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1; // online users first
+    return String(b.createdAt).localeCompare(String(a.createdAt));
+  });
+
+  return { count: users.length, onlineCount: users.filter((u) => u.online).length, users };
+}
+
+// ---------- SITE ANALYTICS (anonymous page views, public write / admin read) ----------
+function pageviewSk(dateStr, uid) {
+  return `PAGEVIEW#${dateStr}#${uid}`;
+}
+
+async function recordPageview(body) {
+  const path = trim(body.path).slice(0, 200) || "/";
+  const visitorId = trim(body.visitorId).slice(0, 100);
+  if (!visitorId) return { error: "Missing visitorId" };
+
+  const now = new Date().toISOString();
+  const dateStr = now.slice(0, 10);
+
+  await ddb.send(
+    new PutCommand({
+      TableName: EVENTS_TABLE,
+      Item: {
+        clubId: CLUB_ID,
+        sk: pageviewSk(dateStr, uuid()),
+        type: "PAGEVIEW",
+        path,
+        visitorId,
+        dateStr,
+        ts: now,
+      },
+    })
+  );
+
+  return { ok: true };
+}
+
+async function getSiteAnalytics(days = 30) {
+  const n = Math.min(90, Math.max(1, Number(days) || 30));
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - (n - 1));
+  const startStr = start.toISOString().slice(0, 10);
+  const endStr = end.toISOString().slice(0, 10);
+
+  const res = await ddb.send(
+    new QueryCommand({
+      TableName: EVENTS_TABLE,
+      KeyConditionExpression: "clubId = :c AND sk BETWEEN :lo AND :hi",
+      ExpressionAttributeValues: {
+        ":c": CLUB_ID,
+        ":lo": `PAGEVIEW#${startStr}`,
+        ":hi": `PAGEVIEW#${endStr}\uffff`,
+      },
+    })
+  );
+
+  const items = res.Items || [];
+
+  const uniqueVisitors = new Set();
+  const byPath = new Map();
+  const byDay = new Map();
+
+  for (const it of items) {
+    uniqueVisitors.add(it.visitorId);
+    byPath.set(it.path, (byPath.get(it.path) || 0) + 1);
+    byDay.set(it.dateStr, (byDay.get(it.dateStr) || 0) + 1);
+  }
+
+  const topPages = Array.from(byPath.entries())
+    .map(([path, views]) => ({ path, views }))
+    .sort((a, b) => b.views - a.views)
+    .slice(0, 20);
+
+  const daily = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    const key = d.toISOString().slice(0, 10);
+    daily.push({ date: key, views: byDay.get(key) || 0 });
+  }
+
+  return {
+    rangeDays: n,
+    totalViews: items.length,
+    uniqueVisitors: uniqueVisitors.size,
+    topPages,
+    daily,
+  };
 }
 
 // ---------- Router ----------
@@ -1144,16 +1297,24 @@ export async function handler(event) {
       return json(200, { ok: true });
     }
 
-    const claims = getClaims(event);
-    if (!claims) return json(401, { error: "Unauthorized (missing JWT claims)" });
-
-    const user = getUserFromClaims(claims);
-    const admin = isAdminFromClaims(claims);
-
     const routeKey =
       event.routeKey ||
       event?.requestContext?.routeKey ||
       `${event?.requestContext?.http?.method || ""} ${event?.requestContext?.http?.path || ""}`;
+
+    // A small allowlist of routes that intentionally have NO Cognito
+    // authorizer attached in API Gateway — anonymous site visitors (who
+    // have never logged in) need to be able to hit these. Every other
+    // route still requires a valid JWT, exactly as before.
+    const PUBLIC_ROUTES = new Set(["POST /analytics/pageview"]);
+
+    const claims = getClaims(event);
+    if (!claims && !PUBLIC_ROUTES.has(routeKey)) {
+      return json(401, { error: "Unauthorized (missing JWT claims)" });
+    }
+
+    const user = claims ? getUserFromClaims(claims) : { sub: "", email: "" };
+    const admin = claims ? isAdminFromClaims(claims) : false;
 
     let body = {};
     if (event.body) {
@@ -1162,6 +1323,13 @@ export async function handler(event) {
       } catch {
         return json(400, { error: "Invalid JSON body" });
       }
+    }
+
+    // Anonymous page-view tracking (public route — no login required)
+    if (routeKey === "POST /analytics/pageview") {
+      const r = await recordPageview(body);
+      if (r?.error) return json(400, { error: r.error });
+      return json(200, { ok: true });
     }
 
     // Profile
@@ -1232,6 +1400,14 @@ export async function handler(event) {
     if (routeKey === "GET /admin/users") {
       if (!admin) return json(403, { error: "Admin only" });
       const r = await getRegisteredUsers();
+      return json(200, r);
+    }
+
+    // Admin: site traffic analytics (anonymous + logged-in visitors)
+    if (routeKey === "GET /admin/analytics") {
+      if (!admin) return json(403, { error: "Admin only" });
+      const days = event?.queryStringParameters?.days;
+      const r = await getSiteAnalytics(days);
       return json(200, r);
     }
 

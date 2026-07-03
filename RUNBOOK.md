@@ -44,7 +44,7 @@ section 5 (Player Rankings) for how ranking data is actually computed.
 Vite inlines `VITE_*` variables into the JS bundle **at build time**, not
 runtime. If `.env` is missing or incomplete when you run `npm run build`,
 the bundle will contain literal `undefined` in their place — the login
-button will silently fail (see section 8, Troubleshooting).
+button will silently fail (see section 9, Troubleshooting).
 
 ### Backend (Lambda environment variables)
 
@@ -223,7 +223,71 @@ Without this permission, the route will fail with an `AccessDeniedException`
 from Cognito rather than a PaddleHubs-specific error — if "Registered
 Users" shows a loading error, this is the first thing to check.
 
-## 7. Design system reference
+## 7. Feature: Presence & Site Analytics (Admin)
+
+Two related but separate things, both admin-only:
+
+### Who's online (registered users)
+
+`GET /admin/users` (the same route from section 6) now also returns
+`lastActiveAt` and `online` per user, and an `onlineCount` at the top
+level. This works by piggybacking on `GET /me` — every time a logged-in
+user's profile is fetched (which already happens on page load, tab
+focus, and navigation via `Layout.jsx`), the Lambda bumps a
+`lastActiveAt` timestamp on their `PLAYERS_TABLE` record. "Online now"
+means active within the last 5 minutes (`ONLINE_WINDOW_MS` in
+`lambda_index.mjs` — change that constant to adjust the window).
+
+This is **retroactive only from the moment it's deployed** — a user who
+registered long ago but hasn't triggered a `/me` call since deployment
+shows "Never" until their next login/visit. Nothing is backfilled.
+
+### Site-wide page views (everyone, including anonymous visitors)
+
+This is a genuinely different mechanism, because most visitors to a
+public club site have never logged in and have no JWT — the existing
+`GET /me`-based approach can't see them at all.
+
+- **A new public route**: `POST /analytics/pageview` is the **first
+  route in this project with no Cognito authorizer attached in API
+  Gateway** — it's intentionally open, since anonymous visitors have no
+  token to send. The Lambda itself now has a small allowlist
+  (`PUBLIC_ROUTES` near the top of the `handler()` function) that lets
+  this one route through the otherwise-universal `if (!claims) return
+  401` check every other route still enforces.
+- **Anonymous visitor identity**: `src/lib/analytics.js` generates a
+  random UUID once per browser, stored in `localStorage`
+  (`ph_visitor_id`) — not tied to any account, just enough to distinguish
+  "10 views from 1 person" from "10 views from 10 people."
+- **Fires on every route change**: wired into `src/App.jsx` via a
+  `useEffect` on `location.pathname`, calling `trackPageview()` — this
+  runs for every page, logged in or not, and swallows all errors so a
+  tracking failure can never break the app.
+- **Admin view**: `GET /admin/analytics?days=N` (admin-only, normal JWT
+  route) aggregates total views, unique visitors, a daily bar chart, and
+  a top-pages table for the selected range (7/30/90 days). Frontend:
+  `src/pages/AdminAnalytics.jsx`, nav item "Site Analytics".
+- Data is stored in `EVENTS_TABLE` as `PAGEVIEW#{date}#{uuid}` items —
+  purely additive, doesn't touch any other feature's data.
+
+**Required for this to work:**
+
+1. Deploy the updated `lambda_index.mjs`.
+2. In API Gateway, create `POST /analytics/pageview` — **do not attach
+   any authorizer to this one**, unlike every other route in this
+   project. Attaching the JWT authorizer here would reject every
+   anonymous visitor with a 401, defeating the entire point.
+3. Create `GET /admin/analytics` normally, **with** the
+   `paddlehubs-cognito-jwt` authorizer attached, same as other admin
+   routes.
+4. Deploy the stage.
+
+If page views aren't showing up in the admin dashboard, check the
+browser network tab for the `POST .../analytics/pageview` call — a 401
+there means the authorizer got attached by habit; remove it from that
+one route specifically.
+
+## 8. Design system reference
 
 - **Tokens**: `src/index.css` — CSS custom properties for three palettes
   (`hardcourt`, `clay`, `grandslam`), each with a light and dark variant,
@@ -244,7 +308,7 @@ Users" shows a loading error, this is the first thing to check.
   (`public/favicon.svg`) is a fixed-color copy (Hard Court palette) since
   favicons load before the app's theme system exists.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 **Login button does nothing, no navigation, no visible error.**
 Check the Network tab for a request like `login?client_id=undefined&...`.
@@ -291,7 +355,7 @@ first place to check.
 Only matches created after the player-rankings feature shipped have the
 per-player data needed to be counted.
 
-## 9. Mobile apps (iOS & Android via Capacitor)
+## 10. Mobile apps (iOS & Android via Capacitor)
 
 The React app is wrapped as real installable iOS/Android apps using
 [Capacitor](https://capacitorjs.com/) — it reuses 100% of the existing
@@ -385,7 +449,7 @@ intent filter to the existing `MainActivity` entry:
   credentials), it satisfies both Apple's and Google's third-party login
   review requirements out of the box
 
-## 10. Known housekeeping
+## 11. Known housekeeping
 
 - A stray `paddlehubs-site/` subfolder (leftover debris with an old
   `index.html` and `eslint.config.js`) and unused Vite boilerplate CSS

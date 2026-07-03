@@ -164,5 +164,8 @@ export const api = {
   getAdminUsers() {
     return req(`/admin/users`);
   },
+  getSiteAnalytics(days = 30) {
+    return req(`/admin/analytics?days=${encodeURIComponent(days)}`);
+  },
 };
 

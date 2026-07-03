@@ -1,10 +1,11 @@
 // /opt/paddlehubs-site/src/App.jsx
 import React, { useEffect } from "react";
-import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 
 import Layout from "./components/Layout.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
+import { trackPageview } from "./lib/analytics.js";
 
 import Dashboard from "./pages/Dashboard.jsx";
 import CourtBooking from "./pages/CourtBooking.jsx";
@@ -18,9 +19,18 @@ import TournamentDetails from "./pages/TournamentDetails.jsx";
 import Rankings from "./pages/Rankings.jsx";
 import PlayerRankings from "./pages/PlayerRankings.jsx";
 import AdminUsers from "./pages/AdminUsers.jsx";
+import AdminAnalytics from "./pages/AdminAnalytics.jsx";
 
 export default function App() {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Anonymous page-view tracking — fires for every visitor on every
+  // route change, logged in or not. Never blocks rendering; failures
+  // are swallowed inside trackPageview.
+  useEffect(() => {
+    trackPageview(location.pathname);
+  }, [location.pathname]);
 
   // Native (iOS/Android) only: Cognito Hosted UI finishes login/logout in
   // the system browser, then hands control back to the app via a custom
@@ -64,6 +74,7 @@ export default function App() {
         <Route path="/rankings" element={<Rankings />} />
         <Route path="/player-rankings" element={<PlayerRankings />} />
         <Route path="/admin/users" element={<AdminUsers />} />
+        <Route path="/admin/analytics" element={<AdminAnalytics />} />
 
         {/* Protected */}
         <Route

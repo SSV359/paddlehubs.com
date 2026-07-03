@@ -1,7 +1,7 @@
 // /opt/paddlehubs-site/src/components/Layout.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { CalendarDays, Home, Menu, Swords, User, X, Users, Trophy, BarChart3, Moon, Sun, Palette, Check, Medal, ShieldCheck } from "lucide-react";
+import { CalendarDays, Home, Menu, Swords, User, X, Users, Trophy, BarChart3, Moon, Sun, Palette, Check, Medal, ShieldCheck, Activity } from "lucide-react";
 
 import PaddleLogo from "./PaddleLogo.jsx";
 import { loginUrl, logoutUrl, isLoggedIn, isAdmin, getUserEmail, clearAuth, openAuthUrl } from "../lib/auth.js";
@@ -153,6 +153,7 @@ export default function Layout() {
       { to: "/tournaments", label: "Tournaments", icon: Trophy, public: false },
       { to: "/profile", label: "My Profile", icon: User, public: false },
       { to: "/admin/users", label: "Registered Users", icon: ShieldCheck, public: false, adminOnly: true },
+      { to: "/admin/analytics", label: "Site Analytics", icon: Activity, public: false, adminOnly: true },
     ],
     []
   );

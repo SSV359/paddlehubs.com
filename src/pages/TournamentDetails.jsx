@@ -60,6 +60,13 @@ function addDays(dateStr, days) {
   return d.toISOString().slice(0, 10);
 }
 
+// Same fallback palette the backend assigns by position when a team has
+// no color set yet — kept in sync so new teams look right before saving.
+const DEFAULT_TEAM_COLORS = [
+  "#E4572E", "#1C4E80", "#2F9E44", "#F2B705", "#8338EC", "#E63980",
+  "#0FA3B1", "#B5651D", "#6C757D", "#D62828", "#3A86FF", "#2A9D8F",
+];
+
 function SectionHeader({ title, count, open, onToggle, right }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -86,6 +93,22 @@ function SectionHeader({ title, count, open, onToggle, right }) {
       </button>
       {right}
     </div>
+  );
+}
+
+// Colored dot + team name — used everywhere a team name is shown, so a
+// team's color (set once in Teams & Players) reflects consistently across
+// standings, the schedule, and the matches table.
+function TeamTag({ team, className = "" }) {
+  if (!team) return <span className="text-muted">—</span>;
+  return (
+    <span className={classNames("inline-flex items-center gap-1.5", className)}>
+      <span
+        className="h-2.5 w-2.5 shrink-0 rounded-full border border-black/10"
+        style={{ backgroundColor: team.color || "#888" }}
+      />
+      {team.name}
+    </span>
   );
 }
 
@@ -222,10 +245,11 @@ export default function TournamentDetails() {
         const existing = Array.isArray(tRes?.teams) ? tRes.teams : [];
         const teamsState =
           existing.length > 0
-            ? existing.map((t) => ({
+            ? existing.map((t, i) => ({
                 id: String(t.id),
                 name: t.name || "",
                 players: Array.isArray(t.players) ? t.players.slice() : [],
+                color: t.color || DEFAULT_TEAM_COLORS[i % DEFAULT_TEAM_COLORS.length],
               }))
             : prev.teams.length > 0
             ? prev.teams
@@ -233,6 +257,7 @@ export default function TournamentDetails() {
                 id: "",
                 name: `Team ${i + 1}`,
                 players: Array.from({ length: pp }, () => ""),
+                color: DEFAULT_TEAM_COLORS[i % DEFAULT_TEAM_COLORS.length],
               }));
 
         return { ...prev, teamCount: tc, playersPerTeam: pp, teams: teamsState };
@@ -261,6 +286,7 @@ export default function TournamentDetails() {
       id: "",
       name: `Team ${i + 1}`,
       players: Array.from({ length: playersPerTeam }, () => ""),
+      color: DEFAULT_TEAM_COLORS[i % DEFAULT_TEAM_COLORS.length],
     }));
     setSetup((s) => ({ ...s, teams: t }));
   }
@@ -269,6 +295,14 @@ export default function TournamentDetails() {
     setSetup((s) => {
       const next = (s.teams || []).slice();
       next[idx] = { ...next[idx], name };
+      return { ...s, teams: next };
+    });
+  }
+
+  function setTeamColor(idx, color) {
+    setSetup((s) => {
+      const next = (s.teams || []).slice();
+      next[idx] = { ...next[idx], color };
       return { ...s, teams: next };
     });
   }
@@ -297,6 +331,7 @@ export default function TournamentDetails() {
         id: t.id || undefined,
         name: trim(t.name),
         players: (t.players || []).map((p) => trim(p)).filter(Boolean),
+        color: t.color || "",
       })),
     };
 
@@ -879,6 +914,7 @@ export default function TournamentDetails() {
               <table className="w-full min-w-[480px] text-sm">
                 <thead className="bg-surface2 text-xs uppercase tracking-wide text-muted">
                   <tr>
+                    <th className="whitespace-nowrap px-3 py-2.5 text-left">Color</th>
                     <th className="whitespace-nowrap px-3 py-2.5 text-left">Team</th>
                     {Array.from({ length: Number(setup.playersPerTeam) || 0 }).map((_, pIdx) => (
                       <th key={pIdx} className="whitespace-nowrap px-3 py-2.5 text-left">
@@ -890,6 +926,16 @@ export default function TournamentDetails() {
                 <tbody>
                   {(setup.teams || []).map((t, idx) => (
                     <tr key={idx} className="border-t border-line">
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="color"
+                          value={t.color || DEFAULT_TEAM_COLORS[idx % DEFAULT_TEAM_COLORS.length]}
+                          onChange={(e) => setTeamColor(idx, e.target.value)}
+                          disabled={loading || !canEditTournament}
+                          title="Team color — used everywhere this team's name appears"
+                          className="h-9 w-9 cursor-pointer rounded-lg border border-line bg-surface2 p-1 disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </td>
                       <td className="px-3 py-2.5">
                         <input
                           value={t.name}
@@ -989,7 +1035,13 @@ export default function TournamentDetails() {
                         </td>
 
                         <td className="py-2.5">
-                          <div className="font-semibold">{r.teamName}</div>
+                          <div className="flex items-center gap-1.5 font-semibold">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full border border-black/10"
+                              style={{ backgroundColor: r.color || "#888" }}
+                            />
+                            {r.teamName}
+                          </div>
                           {(r.players || []).length ? (
                             <div className="text-[11px] text-muted">{r.players.join(", ")}</div>
                           ) : null}
@@ -1230,7 +1282,9 @@ export default function TournamentDetails() {
                                                 fx.court
                                               )}
                                             </td>
-                                            <td className="py-2 font-medium">{teamA?.name || "—"}</td>
+                                            <td className="py-2 font-medium">
+                                              <TeamTag team={teamA} />
+                                            </td>
                                             <td className="py-2">
                                               <div className="flex flex-col gap-1">
                                                 {Array.from({ length: perSide }).map((_, pIdx) => (
@@ -1255,7 +1309,9 @@ export default function TournamentDetails() {
                                                 ))}
                                               </div>
                                             </td>
-                                            <td className="py-2 font-medium">{teamB?.name || "—"}</td>
+                                            <td className="py-2 font-medium">
+                                              <TeamTag team={teamB} />
+                                            </td>
                                             <td className="py-2">
                                               <div className="flex flex-col gap-1">
                                                 {Array.from({ length: perSide }).map((_, pIdx) => (
@@ -1642,7 +1698,17 @@ export default function TournamentDetails() {
                         <td className="whitespace-nowrap py-2.5 pl-3 text-muted">{m.date || "—"}</td>
                         <td className="whitespace-nowrap py-2.5 text-muted">{m.court || "—"}</td>
                         <td className="whitespace-nowrap py-2.5 text-muted capitalize">{m.gameType || "—"}</td>
-                        <td className="py-2.5 font-medium">{m.matchup || "Match"}</td>
+                        <td className="py-2.5 font-medium">
+                          {m.teamAId || m.teamBId ? (
+                            <span className="inline-flex flex-wrap items-center gap-1.5">
+                              <TeamTag team={teamsById.get(String(m.teamAId))} />
+                              <span className="text-muted">vs</span>
+                              <TeamTag team={teamsById.get(String(m.teamBId))} />
+                            </span>
+                          ) : (
+                            m.matchup || "Match"
+                          )}
+                        </td>
                         <td
                           className="stat-score whitespace-nowrap py-2.5 text-right"
                           title={
@@ -1658,7 +1724,13 @@ export default function TournamentDetails() {
                             ? `${m.gamesWonA}-${m.gamesWonB}`
                             : m.gamesPlayed ?? 1}
                         </td>
-                        <td className="whitespace-nowrap py-2.5 font-semibold">{m.winner || "—"}</td>
+                        <td className="whitespace-nowrap py-2.5 font-semibold">
+                          {m.winnerTeamId && m.winnerTeamId !== "TIE" ? (
+                            <TeamTag team={teamsById.get(String(m.winnerTeamId))} />
+                          ) : (
+                            m.winner || "—"
+                          )}
+                        </td>
                         <td
                           className="max-w-[220px] truncate py-2.5 text-muted"
                           title={m.notes ? `Notes: ${m.notes}` : ""}

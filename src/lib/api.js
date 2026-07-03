@@ -58,6 +58,39 @@ async function req(path, { method = "GET", body } = {}) {
   return data;
 }
 
+// Unauthenticated variant — used only for the handful of genuinely
+// public routes (anonymous tournament registration). Never sends an
+// auth header and never requires the user to be logged in.
+async function publicReq(path, { method = "GET", body } = {}) {
+  if (!API_BASE) throw new Error("Missing VITE_API_BASE in .env");
+
+  const url = `${API_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+  const headers = {};
+
+  let payload;
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    payload = JSON.stringify(body);
+  }
+
+  const res = await fetch(url, { method, headers, body: payload });
+
+  const text = await res.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!res.ok) {
+    const msg = data?.error || data?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return data;
+}
+
 export const api = {
   // Profile
   getMe() {
@@ -150,6 +183,39 @@ export const api = {
   },
   deleteTournamentSchedule(tournamentId) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/schedule`, { method: "DELETE" });
+  },
+
+  // Tournament registrations
+  getTournamentPublicInfo(tournamentId) {
+    // Public — minimal info only (no rosters), no login required.
+    return publicReq(`/tournaments/${encodeURIComponent(tournamentId)}/public-info`);
+  },
+  registerForTournament(tournamentId, payload) {
+    // Public — no login required, prospective players may not have an account yet.
+    return publicReq(`/tournaments/${encodeURIComponent(tournamentId)}/register`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  getTournamentRegistrations(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/registrations`);
+  },
+  setRegistrationPaid(tournamentId, regId, paid) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/registrations/${encodeURIComponent(regId)}`, {
+      method: "PUT",
+      body: { paid },
+    });
+  },
+  deleteRegistration(tournamentId, regId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/registrations/${encodeURIComponent(regId)}`, {
+      method: "DELETE",
+    });
+  },
+  updateRegistrationWindow(tournamentId, payload) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/registration-window`, {
+      method: "PUT",
+      body: payload,
+    });
   },
 
   // Player rankings

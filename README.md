@@ -55,6 +55,9 @@ Court, Grand Slam) and both light and dark mode, on desktop and mobile.
   matches by itself; a "Use" button on any fixture loads it straight into
   Add Match to record the real outcome. Deletable at the whole-schedule,
   single-week, or single-fixture level if something needs fixing
+- **Tournament registration links** — a shareable public link per
+  tournament lets prospective players sign up with no account needed;
+  admins get a paid/unpaid checkbox per registrant
 - **Per-game scoring** — matches can be 1–6 games; the winner is decided
   by games won, not raw point totals (a 2–1 win counts even if the loser
   scored more total points), with a full per-game breakdown on hover
@@ -79,7 +82,7 @@ Court, Grand Slam) and both light and dark mode, on desktop and mobile.
   list has its own search filter and newest/oldest sort toggle
 - **Responsive** — built mobile-first, tested down to narrow phone widths
 - **iOS & Android apps** — the same app wrapped natively via Capacitor;
-  see [RUNBOOK.md § Mobile apps](./RUNBOOK.md#10-mobile-apps-ios--android-via-capacitor)
+  see [RUNBOOK.md § Mobile apps](./RUNBOOK.md#11-mobile-apps-ios--android-via-capacitor)
 
 ## Tech stack
 

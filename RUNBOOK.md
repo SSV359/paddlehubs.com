@@ -44,7 +44,7 @@ section 5 (Player Rankings) for how ranking data is actually computed.
 Vite inlines `VITE_*` variables into the JS bundle **at build time**, not
 runtime. If `.env` is missing or incomplete when you run `npm run build`,
 the bundle will contain literal `undefined` in their place — the login
-button will silently fail (see section 9, Troubleshooting).
+button will silently fail (see section 10, Troubleshooting).
 
 ### Backend (Lambda environment variables)
 
@@ -287,7 +287,64 @@ browser network tab for the `POST .../analytics/pageview` call — a 401
 there means the authorizer got attached by habit; remove it from that
 one route specifically.
 
-## 8. Design system reference
+## 8. Feature: Tournament Registration Links
+
+A shareable public link per tournament lets prospective players sign up
+without needing an account, plus a paid/unpaid tracker for admins.
+
+- **"Copy Registration Link"** button on the Tournament page (owner/admin
+  only) copies `https://paddlehubs.com/tournaments/{id}/register` to the
+  clipboard. A **"Show QR Code"** button next to it generates a scannable
+  QR code for the same link entirely client-side (via the `qrcode` npm
+  package — no external service, no network call), with a download
+  button for printing.
+- **The registration page itself is public** (`src/pages/TournamentRegister.jsx`,
+  routed outside `RequireAuth` in `App.jsx`) — anyone with the link can
+  submit their name, **required email**, optional phone, and notes, with
+  no login. Email is validated both client-side and server-side.
+- **Two new public routes**, alongside the analytics one from section 7:
+  - `GET /tournaments/{id}/public-info` — minimal, safe info only (name,
+    dates, status). Deliberately does **not** return `teams`/rosters,
+    even though the full tournament object has them — a public
+    registration page has no business exposing who else is playing.
+  - `POST /tournaments/{id}/register` — accepts the sign-up submission.
+- **Admin view**: a "Registrations" section on the Tournament page
+  (owner/admin only) lists everyone who registered, with a checkbox per
+  row to mark them paid — this updates immediately via `PUT
+  /tournaments/{id}/registrations/{regId}`, no separate save step. A
+  "Remove" button (`DELETE .../registrations/{regId}`) deletes bad or
+  duplicate entries.
+- Stored in `EVENTS_TABLE` as `TREG#{tournamentId}#{regId}` items —
+  separate from teams, matches, and schedules; registering doesn't
+  create or modify any of those.
+- **Registration window**: every tournament has `registrationStartDate`
+  and `registrationEndDate`, settable at creation (defaults to "opens
+  today, closes when the tournament starts" if left blank) and editable
+  afterward from the "Registration Window" control inside the
+  Registrations panel — kept as its own endpoint
+  (`PUT /tournaments/{id}/registration-window`) specifically so editing
+  it can never accidentally touch team/roster data the way reusing the
+  team-save endpoint would risk. Enforced **server-side** in
+  `createRegistration` (submissions outside the window are rejected with
+  a clear message) and shown proactively on the public page itself
+  (`src/pages/TournamentRegister.jsx` disables the form and explains why
+  before someone even tries to submit).
+
+**Required setup — four new API Gateway routes:**
+
+1. `GET /tournaments/{id}/public-info` — **no authorizer** (public)
+2. `POST /tournaments/{id}/register` — **no authorizer** (public)
+3. `GET /tournaments/{id}/registrations`, `PUT
+   /tournaments/{id}/registrations/{regId}`, `DELETE
+   /tournaments/{id}/registrations/{regId}` — **with** the
+   `paddlehubs-cognito-jwt` authorizer (these are admin/owner-checked
+   inside the Lambda too, same pattern as team setup)
+4. `PUT /tournaments/{id}/registration-window` — **with** the authorizer
+
+Deploy the stage after adding these, same as every other route in this
+project.
+
+## 9. Design system reference
 
 - **Tokens**: `src/index.css` — CSS custom properties for three palettes
   (`hardcourt`, `clay`, `grandslam`), each with a light and dark variant,
@@ -308,7 +365,7 @@ one route specifically.
   (`public/favicon.svg`) is a fixed-color copy (Hard Court palette) since
   favicons load before the app's theme system exists.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 **Login button does nothing, no navigation, no visible error.**
 Check the Network tab for a request like `login?client_id=undefined&...`.
@@ -355,7 +412,7 @@ first place to check.
 Only matches created after the player-rankings feature shipped have the
 per-player data needed to be counted.
 
-## 10. Mobile apps (iOS & Android via Capacitor)
+## 11. Mobile apps (iOS & Android via Capacitor)
 
 The React app is wrapped as real installable iOS/Android apps using
 [Capacitor](https://capacitorjs.com/) — it reuses 100% of the existing
@@ -449,7 +506,7 @@ intent filter to the existing `MainActivity` entry:
   credentials), it satisfies both Apple's and Google's third-party login
   review requirements out of the box
 
-## 11. Known housekeeping
+## 12. Known housekeeping
 
 - A stray `paddlehubs-site/` subfolder (leftover debris with an old
   `index.html` and `eslint.config.js`) and unused Vite boilerplate CSS

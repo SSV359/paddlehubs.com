@@ -25,6 +25,8 @@ export default function Tournaments() {
     name: "",
     startDate: new Date().toISOString().slice(0, 10),
     endDate: new Date().toISOString().slice(0, 10),
+    registrationStartDate: new Date().toISOString().slice(0, 10),
+    registrationEndDate: new Date().toISOString().slice(0, 10),
     teamCount: 4,
     playersPerTeam: 2,
   });
@@ -70,6 +72,8 @@ export default function Tournaments() {
       name: trim(form.name),
       startDate: trim(form.startDate),
       endDate: trim(form.endDate),
+      registrationStartDate: trim(form.registrationStartDate),
+      registrationEndDate: trim(form.registrationEndDate),
       teamCount: Number(form.teamCount),
       playersPerTeam: Number(form.playersPerTeam),
     };
@@ -164,6 +168,31 @@ export default function Tournaments() {
                     type="date"
                     name="endDate"
                     value={form.endDate}
+                    onChange={onChange}
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted">Registration Opens</label>
+                  <input
+                    type="date"
+                    name="registrationStartDate"
+                    value={form.registrationStartDate}
+                    onChange={onChange}
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted">Registration Closes</label>
+                  <input
+                    type="date"
+                    name="registrationEndDate"
+                    value={form.registrationEndDate}
                     onChange={onChange}
                     className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                     disabled={loading}

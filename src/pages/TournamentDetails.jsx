@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { isLoggedIn, getUserSub, isAdmin } from "../lib/auth.js";
 import { api } from "../lib/api.js";
 import { Pill } from "../components/ui.jsx";
+import QRCode from "qrcode";
 
 function trim(v) {
   return String(v || "").trim();
@@ -145,6 +146,15 @@ export default function TournamentDetails() {
     gameType: "doubles",
   });
   const [schedule, setSchedule] = useState([]); // array of weeks -> { week, date, skipped, fixtures }
+
+  const [registrationsOpen, setRegistrationsOpen] = useState(true);
+  const [registrations, setRegistrations] = useState([]);
+  const [regLoading, setRegLoading] = useState(false);
+  const [regErr, setRegErr] = useState("");
+  const [showQr, setShowQr] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [regWindow, setRegWindow] = useState({ registrationStartDate: "", registrationEndDate: "" });
+  const [savingRegWindow, setSavingRegWindow] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState({}); // { [week]: bool }
 
   // Matches table: text filter + sort direction
@@ -201,6 +211,10 @@ export default function TournamentDetails() {
         return;
       }
       setTournament(tRes);
+      setRegWindow({
+        registrationStartDate: tRes?.registrationStartDate || "",
+        registrationEndDate: tRes?.registrationEndDate || "",
+      });
 
       const mRes = await api.listTournamentMatches(id);
       setMatches(mRes?.items || []);
@@ -273,6 +287,11 @@ export default function TournamentDetails() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn, id]);
+
+  useEffect(() => {
+    if (canEditTournament) loadRegistrations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEditTournament, id]);
 
   function onSetupChange(e) {
     const { name, value } = e.target;
@@ -729,6 +748,94 @@ export default function TournamentDetails() {
     }
   }
 
+  function copyRegistrationLink() {
+    if (!id) return;
+    const url = `${window.location.origin}/tournaments/${id}/register`;
+    navigator.clipboard
+      ?.writeText(url)
+      .then(() => setMsg("Registration link copied ✅"))
+      .catch(() => setErr(`Copy failed — link: ${url}`));
+  }
+
+  async function toggleQrCode() {
+    if (showQr) {
+      setShowQr(false);
+      return;
+    }
+    if (!id) return;
+    setErr("");
+    try {
+      const url = `${window.location.origin}/tournaments/${id}/register`;
+      const dataUrl = await QRCode.toDataURL(url, { width: 220, margin: 1 });
+      setQrDataUrl(dataUrl);
+      setShowQr(true);
+    } catch (e) {
+      setErr("Couldn't generate QR code: " + String(e?.message || e));
+    }
+  }
+
+  function onRegWindowChange(e) {
+    const { name, value } = e.target;
+    setRegWindow((f) => ({ ...f, [name]: value }));
+  }
+
+  async function saveRegistrationWindow() {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can change the registration window.");
+    if (!regWindow.registrationStartDate || !regWindow.registrationEndDate) {
+      return setErr("Both registration dates are required.");
+    }
+    if (regWindow.registrationEndDate < regWindow.registrationStartDate) {
+      return setErr("Registration close date can't be before the open date.");
+    }
+
+    setErr("");
+    setMsg("");
+    setSavingRegWindow(true);
+    try {
+      await api.updateRegistrationWindow(id, regWindow);
+      setTournament((t) => (t ? { ...t, ...regWindow } : t));
+      setMsg("Registration window updated ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSavingRegWindow(false);
+    }
+  }
+
+  async function loadRegistrations() {
+    if (!canEditTournament || !id) return;
+    setRegLoading(true);
+    try {
+      const res = await api.getTournamentRegistrations(id);
+      setRegistrations(res?.items || []);
+    } catch (e) {
+      console.error("Registrations failed to load:", e);
+      setRegErr(String(e?.message || e));
+    } finally {
+      setRegLoading(false);
+    }
+  }
+
+  async function toggleRegistrationPaid(reg) {
+    try {
+      await api.setRegistrationPaid(id, reg.id, !reg.paid);
+      setRegistrations((prev) => prev.map((r) => (r.id === reg.id ? { ...r, paid: !r.paid } : r)));
+    } catch (e) {
+      setRegErr(String(e?.message || e));
+    }
+  }
+
+  async function removeRegistration(reg) {
+    const ok = confirm(`Remove ${reg.name}'s registration?`);
+    if (!ok) return;
+    try {
+      await api.deleteRegistration(id, reg.id);
+      setRegistrations((prev) => prev.filter((r) => r.id !== reg.id));
+    } catch (e) {
+      setRegErr(String(e?.message || e));
+    }
+  }
+
   function canDeleteMatch(m) {
     return admin || (m?.ownerSub && m.ownerSub === mySub);
   }
@@ -813,6 +920,23 @@ export default function TournamentDetails() {
           </div>
 
           <div className="flex items-center gap-2">
+            {loggedIn && tournament && canEditTournament ? (
+              <>
+                <button
+                  onClick={copyRegistrationLink}
+                  className="rounded-2xl border border-line bg-surface2 hover:bg-line px-3 py-2 text-xs font-medium"
+                >
+                  Copy Registration Link
+                </button>
+                <button
+                  onClick={toggleQrCode}
+                  className="rounded-2xl border border-line bg-surface2 hover:bg-line px-3 py-2 text-xs font-medium"
+                >
+                  {showQr ? "Hide QR Code" : "Show QR Code"}
+                </button>
+              </>
+            ) : null}
+
             {loggedIn && tournament && canDeleteTournament ? (
               <button
                 onClick={onDeleteTournament}
@@ -833,6 +957,28 @@ export default function TournamentDetails() {
         </div>
       </div>
 
+      {showQr && qrDataUrl && (
+        <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <img src={qrDataUrl} alt="Tournament registration QR code" className="rounded-xl border border-line" />
+            <div>
+              <div className="font-semibold">Scan to register</div>
+              <div className="mt-1 max-w-sm text-sm text-muted">
+                Print this or display it at the club — scanning it opens the registration form directly, no login
+                needed.
+              </div>
+              <a
+                href={qrDataUrl}
+                download={`${(tournament?.name || "tournament").replace(/\s+/g, "-").toLowerCase()}-registration-qr.png`}
+                className="mt-3 inline-block rounded-xl border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:bg-line"
+              >
+                Download QR Code
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {err && (
         <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{err}</div>
       )}
@@ -846,6 +992,134 @@ export default function TournamentDetails() {
         <div className="rounded-2xl border border-line bg-surface p-6 text-muted">Please login.</div>
       ) : (
         <div className="grid grid-cols-1 gap-6">
+          {/* Registrations — anonymous sign-ups via the shareable link, admin/owner only */}
+          {canEditTournament && (
+            <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+              <SectionHeader
+                title="Registrations"
+                open={registrationsOpen}
+                onToggle={() => setRegistrationsOpen((v) => !v)}
+                count={registrations.length || null}
+                right={
+                  <button
+                    type="button"
+                    onClick={loadRegistrations}
+                    disabled={regLoading}
+                    className="rounded-xl border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:bg-line disabled:opacity-40"
+                  >
+                    Refresh
+                  </button>
+                }
+              />
+
+              {registrationsOpen && (
+                <>
+                  <div className="mt-3 text-xs text-muted">
+                    Share this tournament's registration link with prospective players — they can sign up without
+                    needing an account. Use <strong>Copy Registration Link</strong> above.
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-line bg-surface2 p-4">
+                    <div className="text-sm font-semibold">Registration Window</div>
+                    <div className="mt-1 text-xs text-muted">
+                      The public form only accepts sign-ups between these dates.
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="text-xs text-muted">Opens</label>
+                        <input
+                          type="date"
+                          name="registrationStartDate"
+                          value={regWindow.registrationStartDate}
+                          onChange={onRegWindowChange}
+                          disabled={!canEditTournament || savingRegWindow}
+                          className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm disabled:opacity-60"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted">Closes</label>
+                        <input
+                          type="date"
+                          name="registrationEndDate"
+                          value={regWindow.registrationEndDate}
+                          onChange={onRegWindowChange}
+                          disabled={!canEditTournament || savingRegWindow}
+                          className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm disabled:opacity-60"
+                        />
+                      </div>
+                    </div>
+                    {canEditTournament && (
+                      <button
+                        type="button"
+                        onClick={saveRegistrationWindow}
+                        disabled={savingRegWindow}
+                        className="mt-3 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
+                      >
+                        {savingRegWindow ? "Saving..." : "Save Window"}
+                      </button>
+                    )}
+                  </div>
+
+                  {regErr && <div className="mt-3 text-xs text-muted">{regErr}</div>}
+
+                  {regLoading && registrations.length === 0 ? (
+                    <div className="mt-4 text-sm text-muted">Loading registrations…</div>
+                  ) : registrations.length === 0 ? (
+                    <div className="mt-4 text-sm text-muted">No registrations yet.</div>
+                  ) : (
+                    <div className="mt-4 overflow-x-auto rounded-xl border border-line">
+                      <table className="w-full min-w-[560px] text-sm">
+                        <thead className="bg-surface2 text-xs uppercase tracking-wide text-muted">
+                          <tr>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-left">Name</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-left">Email</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-left">Phone</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-left">Notes</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-left">Registered</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 text-center">Paid</th>
+                            <th className="whitespace-nowrap px-3 py-2.5 pr-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {registrations.map((r) => (
+                            <tr key={r.id} className="border-t border-line">
+                              <td className="px-3 py-2.5 font-medium">{r.name}</td>
+                              <td className="px-3 py-2.5 text-muted">{r.email || "—"}</td>
+                              <td className="px-3 py-2.5 text-muted">{r.phone || "—"}</td>
+                              <td className="max-w-[220px] truncate px-3 py-2.5 text-muted" title={r.notes || ""}>
+                                {r.notes || "—"}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2.5 text-muted">
+                                {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}
+                              </td>
+                              <td className="px-3 py-2.5 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={!!r.paid}
+                                  onChange={() => toggleRegistrationPaid(r)}
+                                  className="h-4 w-4 cursor-pointer"
+                                  title={r.paid ? "Paid" : "Not paid yet"}
+                                />
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2.5 pr-3 text-right">
+                                <button
+                                  onClick={() => removeRegistration(r)}
+                                  className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {/* Teams & Players — compact roster table */}
           <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <SectionHeader

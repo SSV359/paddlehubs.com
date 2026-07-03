@@ -20,6 +20,7 @@ import Rankings from "./pages/Rankings.jsx";
 import PlayerRankings from "./pages/PlayerRankings.jsx";
 import AdminUsers from "./pages/AdminUsers.jsx";
 import AdminAnalytics from "./pages/AdminAnalytics.jsx";
+import TournamentRegister from "./pages/TournamentRegister.jsx";
 
 export default function App() {
   const navigate = useNavigate();
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="/player-rankings" element={<PlayerRankings />} />
         <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/admin/analytics" element={<AdminAnalytics />} />
+        <Route path="/tournaments/:id/register" element={<TournamentRegister />} />
 
         {/* Protected */}
         <Route

@@ -465,6 +465,16 @@ async function createTournament({ sub, email }, body) {
   if (!Number.isFinite(playersPerTeam) || playersPerTeam < 1 || playersPerTeam > 20)
     return { error: "Invalid playersPerTeam" };
 
+  // Registration window — defaults to "open now, closes when the
+  // tournament starts" if not explicitly provided.
+  const today = new Date().toISOString().slice(0, 10);
+  const registrationStartDate = trim(body.registrationStartDate) || today;
+  const registrationEndDate = trim(body.registrationEndDate) || startDate;
+
+  if (registrationEndDate < registrationStartDate) {
+    return { error: "Registration end date cannot be before registration start date" };
+  }
+
   const me = await getMe({ sub });
   const displayName = (me.displayName || "").trim() || emailPrefix(email);
 
@@ -482,6 +492,8 @@ async function createTournament({ sub, email }, body) {
     name,
     startDate,
     endDate,
+    registrationStartDate,
+    registrationEndDate,
     status: "ACTIVE",
     ownerSub: sub,
     ownerEmail: email || "",
@@ -691,6 +703,153 @@ async function deleteTournamentAuthorized({ sub }, isAdmin, tournamentId) {
     );
   } catch {}
 
+  return { ok: true };
+}
+
+// ---------- TOURNAMENT REGISTRATIONS (public sign-up + paid tracking) ----------
+function registrationSk(tournamentId, regId) {
+  return `TREG#${tournamentId}#${regId}`;
+}
+
+// Public — anyone with the registration link can submit this, no login
+// required, since prospective players may not have an account yet.
+// Public, minimal — only what a prospective registrant needs to see.
+// Deliberately excludes teams/rosters, which stay behind login.
+async function getTournamentPublicInfo(tournamentId) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found" };
+  const t = rec.item;
+  return {
+    id: t.id,
+    name: t.name,
+    startDate: t.startDate,
+    endDate: t.endDate,
+    status: t.status,
+    registrationStartDate: t.registrationStartDate || "",
+    registrationEndDate: t.registrationEndDate || "",
+  };
+}
+
+async function updateRegistrationWindow({ sub }, isAdmin, tournamentId, body) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found", statusCode: 404 };
+  const t = rec.item;
+  if (!isAdmin && t.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  const registrationStartDate = trim(body.registrationStartDate);
+  const registrationEndDate = trim(body.registrationEndDate);
+
+  if (!registrationStartDate || !registrationEndDate) {
+    return { error: "Both registrationStartDate and registrationEndDate are required" };
+  }
+  if (registrationEndDate < registrationStartDate) {
+    return { error: "Registration end date cannot be before registration start date" };
+  }
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: EVENTS_TABLE,
+      Key: { clubId: CLUB_ID, sk: rec.sk },
+      UpdateExpression: "SET registrationStartDate = :s, registrationEndDate = :e, updatedAt = :u",
+      ExpressionAttributeValues: {
+        ":s": registrationStartDate,
+        ":e": registrationEndDate,
+        ":u": new Date().toISOString(),
+      },
+    })
+  );
+
+  return { ok: true, registrationStartDate, registrationEndDate };
+}
+
+async function createRegistration(tournamentId, body) {
+  const name = trim(body.name);
+  const email = trim(body.email).toLowerCase().slice(0, 200);
+  const phone = trim(body.phone).slice(0, 50);
+  const notes = trim(body.notes).slice(0, 500);
+
+  if (!tournamentId) return { error: "Missing tournament id" };
+  if (!name) return { error: "Name is required" };
+  if (!email) return { error: "Email is required" };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Please enter a valid email address" };
+
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found" };
+  const t = rec.item;
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (t.registrationStartDate && today < t.registrationStartDate) {
+    return { error: `Registration opens ${t.registrationStartDate}.` };
+  }
+  if (t.registrationEndDate && today > t.registrationEndDate) {
+    return { error: `Registration closed on ${t.registrationEndDate}.` };
+  }
+
+  const id = uuid();
+  const createdAt = new Date().toISOString();
+
+  const item = {
+    clubId: CLUB_ID,
+    sk: registrationSk(tournamentId, id),
+    type: "TREG",
+    id,
+    tournamentId,
+    name,
+    email,
+    phone,
+    notes,
+    paid: false,
+    createdAt,
+  };
+
+  await ddb.send(new PutCommand({ TableName: EVENTS_TABLE, Item: item }));
+  return { ok: true, id };
+}
+
+// Admin/owner only from here down.
+async function listRegistrations(tournamentId) {
+  const prefix = `TREG#${tournamentId}#`;
+  const res = await ddb.send(
+    new QueryCommand({
+      TableName: EVENTS_TABLE,
+      KeyConditionExpression: "clubId = :c AND begins_with(sk, :p)",
+      ExpressionAttributeValues: { ":c": CLUB_ID, ":p": prefix },
+      ScanIndexForward: true,
+    })
+  );
+  return { items: res.Items || [] };
+}
+
+async function setRegistrationPaid({ sub }, isAdmin, tournamentId, regId, paid) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found", statusCode: 404 };
+  const t = rec.item;
+  if (!isAdmin && t.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  const sk = registrationSk(tournamentId, regId);
+  await ddb.send(
+    new UpdateCommand({
+      TableName: EVENTS_TABLE,
+      Key: { clubId: CLUB_ID, sk },
+      UpdateExpression: "SET paid = :p",
+      ExpressionAttributeValues: { ":p": !!paid },
+    })
+  );
+  return { ok: true };
+}
+
+async function deleteRegistration({ sub }, isAdmin, tournamentId, regId) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found", statusCode: 404 };
+  const t = rec.item;
+  if (!isAdmin && t.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  await ddb.send(
+    new DeleteCommand({
+      TableName: EVENTS_TABLE,
+      Key: { clubId: CLUB_ID, sk: registrationSk(tournamentId, regId) },
+    })
+  );
   return { ok: true };
 }
 
@@ -1306,7 +1465,11 @@ export async function handler(event) {
     // authorizer attached in API Gateway — anonymous site visitors (who
     // have never logged in) need to be able to hit these. Every other
     // route still requires a valid JWT, exactly as before.
-    const PUBLIC_ROUTES = new Set(["POST /analytics/pageview"]);
+    const PUBLIC_ROUTES = new Set([
+      "POST /analytics/pageview",
+      "POST /tournaments/{id}/register",
+      "GET /tournaments/{id}/public-info",
+    ]);
 
     const claims = getClaims(event);
     if (!claims && !PUBLIC_ROUTES.has(routeKey)) {
@@ -1472,6 +1635,71 @@ export async function handler(event) {
       if (!id) return json(400, { error: "Missing tournament id" });
 
       const r = await deleteTournamentSchedule({ sub: user.sub }, admin, id);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+
+      return json(200, r);
+    }
+
+    // Tournament registrations (public sign-up + admin paid tracking)
+    if (routeKey === "GET /tournaments/{id}/public-info") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const r = await getTournamentPublicInfo(id);
+      if (r?.error) return json(404, { error: r.error });
+
+      return json(200, r);
+    }
+
+    if (routeKey === "PUT /tournaments/{id}/registration-window") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const r = await updateRegistrationWindow({ sub: user.sub }, admin, id, body);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+
+      return json(200, r);
+    }
+
+    if (routeKey === "POST /tournaments/{id}/register") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const r = await createRegistration(id, body);
+      if (r?.error) return json(400, { error: r.error });
+
+      return json(200, r);
+    }
+
+    if (routeKey === "GET /tournaments/{id}/registrations") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const rec = await getTournamentRecord(id);
+      if (!rec) return json(404, { error: "Tournament not found" });
+      if (!admin && rec.item.ownerSub !== user.sub) return json(403, { error: "Forbidden" });
+
+      const r = await listRegistrations(id);
+      return json(200, r);
+    }
+
+    if (routeKey === "PUT /tournaments/{id}/registrations/{regId}") {
+      const id = event?.pathParameters?.id;
+      const regId = event?.pathParameters?.regId;
+      if (!id || !regId) return json(400, { error: "Missing tournament id or registration id" });
+
+      const r = await setRegistrationPaid({ sub: user.sub }, admin, id, regId, body.paid);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+
+      return json(200, r);
+    }
+
+    if (routeKey === "DELETE /tournaments/{id}/registrations/{regId}") {
+      const id = event?.pathParameters?.id;
+      const regId = event?.pathParameters?.regId;
+      if (!id || !regId) return json(400, { error: "Missing tournament id or registration id" });
+
+      const r = await deleteRegistration({ sub: user.sub }, admin, id, regId);
       if (r?.error) return json(r.statusCode || 400, { error: r.error });
 
       return json(200, r);

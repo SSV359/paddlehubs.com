@@ -11,11 +11,12 @@ book courts, log match scores, and settle the age-old argument of who's
 actually the best player at the club. What began as a local-only Phase 1
 prototype (Cognito login, court booking, and match entry with no real
 backend) has grown into a full club platform — tournaments with team
-rosters, live standings, individual player rankings scored independently
-from team standings, per-game scoring for multi-game matches, an admin
-view of everyone registered, native iOS/Android apps, and a visual
-identity that actually looks like it belongs to the sport instead of a
-generic admin dashboard.
+rosters, a week-by-week match schedule spanning the whole season, live
+standings, individual player rankings scored independently from team
+standings, per-game scoring for multi-game matches, an admin view of
+everyone registered, native iOS/Android apps, and a visual identity that
+actually looks like it belongs to the sport instead of a generic admin
+dashboard.
 
 The design leans directly on pickleball itself rather than a generic
 "sports app" look: the site's signature divider is modeled on the
@@ -44,6 +45,16 @@ Court, Grand Slam) and both light and dark mode, on desktop and mobile.
   standings, and match recording that requires picking the actual
   players (from each team's saved roster) for every match — 2 players
   per side for doubles, 1 for singles
+- **Weekly match schedule** — generates a full round-robin repeated every
+  week across the tournament's run (e.g. ~13 weeks for a 3-month season).
+  Any week can be marked as a holiday and skipped. Each week is its own
+  collapsible table with independently editable dates, courts, and player
+  pairings — a team's pairing can differ week to week, since it's set per
+  fixture rather than locked for the whole season. Saved separately from
+  real match results, so building or editing the plan never creates
+  matches by itself; a "Use" button on any fixture loads it straight into
+  Add Match to record the real outcome. Deletable at the whole-schedule,
+  single-week, or single-fixture level if something needs fixing
 - **Per-game scoring** — matches can be 1–6 games; the winner is decided
   by games won, not raw point totals (a 2–1 win counts even if the loser
   scored more total points), with a full per-game breakdown on hover
@@ -59,9 +70,9 @@ Court, Grand Slam) and both light and dark mode, on desktop and mobile.
 - **Three visual themes** — Hard Court, Clay Court, Grand Slam, each with
   light and dark mode, switchable independently from a header control
 - **Collapsible, filterable tournament pages** — Teams & Players, Team
-  Standings, and Matches can each be expanded/collapsed so a tournament
-  page doesn't turn into an endless scroll; the match list has its own
-  search filter and newest/oldest sort toggle
+  Standings, Match Schedule, and Matches can each be expanded/collapsed
+  so a tournament page doesn't turn into an endless scroll; the match
+  list has its own search filter and newest/oldest sort toggle
 - **Responsive** — built mobile-first, tested down to narrow phone widths
 - **iOS & Android apps** — the same app wrapped natively via Capacitor;
   see [RUNBOOK.md § Mobile apps](./RUNBOOK.md#9-mobile-apps-ios--android-via-capacitor)
@@ -130,7 +141,7 @@ paddlehubs.com/
 │     ├─ CourtBooking.jsx
 │     ├─ MatchDetails.jsx
 │     ├─ Tournaments.jsx
-│     ├─ TournamentDetails.jsx     # teams/players, standings, matches, per-game scoring
+│     ├─ TournamentDetails.jsx     # teams/players, standings, weekly schedule, matches
 │     ├─ Rankings.jsx              # team standings, per tournament
 │     ├─ PlayerRankings.jsx        # individual player standings, overall + per-tournament
 │     ├─ AdminUsers.jsx            # admin-only: registered users list (Cognito)

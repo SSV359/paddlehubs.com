@@ -138,6 +138,17 @@ export const api = {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/standings`);
   },
 
+  // Match schedule
+  getTournamentSchedule(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/schedule`);
+  },
+  saveTournamentSchedule(tournamentId, payload) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/schedule`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+
   // Player rankings
   getPlayerRankings() {
     return req(`/player-rankings`);

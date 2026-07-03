@@ -11,35 +11,57 @@ book courts, log match scores, and settle the age-old argument of who's
 actually the best player at the club. What began as a local-only Phase 1
 prototype (Cognito login, court booking, and match entry with no real
 backend) has grown into a full club platform — tournaments with team
-rosters, live standings, individual player rankings, and a visual identity
-that actually looks like it belongs to the sport instead of a generic
-admin dashboard.
+rosters, live standings, individual player rankings scored independently
+from team standings, per-game scoring for multi-game matches, an admin
+view of everyone registered, native iOS/Android apps, and a visual
+identity that actually looks like it belongs to the sport instead of a
+generic admin dashboard.
 
 The design leans directly on pickleball itself rather than a generic
 "sports app" look: the site's signature divider is modeled on the
 **kitchen line** (the non-volley-zone line, 7 feet from the net), the
-accent color is the ball's optic yellow, and the logo is a paddle face
-with its actual honeycomb perforation pattern — a detail specific to
-pickleball paddles. The whole thing works in three court-surface color
-palettes (Hard Court, Clay Court, Grand Slam) and both light and dark
-mode, on desktop and mobile.
+accent color is the ball's optic yellow, and the logo — an original
+design, not a stock icon — is a paddle face with its actual honeycomb
+perforation pattern, a detail specific to pickleball paddles. The whole
+thing works in three court-surface color palettes (Hard Court, Clay
+Court, Grand Slam) and both light and dark mode, on desktop and mobile.
 
-See [RUNBOOK.md](./RUNBOOK.md) for setup, deployment, architecture, and
-troubleshooting.
+## Documentation
+
+- **[RUNBOOK.md](./RUNBOOK.md)** — setup, deployment, architecture,
+  every environment variable, feature internals, and troubleshooting for
+  issues that have actually come up.
+- **[GITHUB_UPLOAD_GUIDE.md](./GITHUB_UPLOAD_GUIDE.md)** — step-by-step
+  for pushing this to GitHub safely, including checking whether secrets
+  ended up in git history before this repo went public.
 
 ## Features
 
 - **Auth** — AWS Cognito Hosted UI login/logout (OAuth2 Authorization Code + PKCE)
 - **Court booking** — weekly-limited court reservations
 - **Match tracking** — singles/doubles match entry and history
-- **Tournaments** — team rosters, match recording, live standings and a podium
-- **Player rankings** — club-wide individual player standings, computed
-  from tournament matches going forward (see RUNBOOK for how this works)
+- **Tournaments** — team rosters editable in a compact table, live
+  standings, and match recording that requires picking the actual
+  players (from each team's saved roster) for every match — 2 players
+  per side for doubles, 1 for singles
+- **Per-game scoring** — matches can be 1–6 games; the winner is decided
+  by games won, not raw point totals (a 2–1 win counts even if the loser
+  scored more total points), with a full per-game breakdown on hover
+- **Player rankings** — both **club-wide** and **per-tournament** views,
+  toggleable from a single page — computed from tournament matches going
+  forward. Deliberately uses a **different point formula from Team
+  Standings** (a loss costs an individual player −0.5, but never
+  subtracts from their team's points) — see RUNBOOK for exactly how this
+  works and why they're kept independent
 - **Club activity feed** — shared view of club bookings and matches
 - **Admin: Registered Users** — a live list of everyone signed up,
   pulled directly from Cognito, visible only to club admins
 - **Three visual themes** — Hard Court, Clay Court, Grand Slam, each with
-  light and dark mode
+  light and dark mode, switchable independently from a header control
+- **Collapsible, filterable tournament pages** — Teams & Players, Team
+  Standings, and Matches can each be expanded/collapsed so a tournament
+  page doesn't turn into an endless scroll; the match list has its own
+  search filter and newest/oldest sort toggle
 - **Responsive** — built mobile-first, tested down to narrow phone widths
 - **iOS & Android apps** — the same app wrapped natively via Capacitor;
   see [RUNBOOK.md § Mobile apps](./RUNBOOK.md#9-mobile-apps-ios--android-via-capacitor)
@@ -63,9 +85,15 @@ npm run dev      # local development
 npm run build    # production build -> dist/
 ```
 
-Requires a `.env` file in the project root — see RUNBOOK.md for the
-required variables. Vite bakes these into the build at build time, so the
-`.env` file must exist *before* running `npm run build`.
+Requires a `.env` file in the project root — copy `.env.example` and
+fill in real values (see RUNBOOK.md § Environment variables for what
+each one does). Vite bakes these into the build at build time, so `.env`
+must exist *before* running `npm run build`, and the app must be
+rebuilt + redeployed after changing it.
+
+**Never commit `.env`** — it's gitignored on purpose. See
+[GITHUB_UPLOAD_GUIDE.md](./GITHUB_UPLOAD_GUIDE.md) before pushing to a
+public repo.
 
 ## Repo structure
 
@@ -73,11 +101,17 @@ required variables. Vite bakes these into the build at build time, so the
 paddlehubs.com/
 ├─ lambda_index.mjs        # backend API (single Lambda handler)
 ├─ backfillPlayers.js      # one-off DynamoDB migration script (not run by the app)
+├─ capacitor.config.ts     # iOS/Android app wrapper config
+├─ .env.example            # template for required env vars — copy to .env, fill in, never commit .env
 ├─ index.html
 ├─ public/
 │  └─ favicon.svg
+├─ resources/              # master icon/splash images for `npx @capacitor/assets generate`
+│  ├─ icon.png
+│  ├─ splash.png
+│  └─ splash-dark.png
 ├─ src/
-│  ├─ App.jsx              # routes
+│  ├─ App.jsx              # routes + native deep-link handling
 │  ├─ main.jsx             # entry point, initializes theme
 │  ├─ index.css            # design tokens, palettes, signature styles
 │  ├─ components/
@@ -87,7 +121,7 @@ paddlehubs.com/
 │  │  ├─ TournamentTeamsSetup.jsx
 │  │  └─ ui.jsx            # shared design-system primitives
 │  ├─ lib/
-│  │  ├─ auth.js           # Cognito PKCE flow, token/claim helpers
+│  │  ├─ auth.js           # Cognito PKCE flow (web + native), token/claim helpers
 │  │  ├─ api.js            # API client
 │  │  └─ theme.js          # palette + light/dark mode persistence
 │  └─ pages/
@@ -96,9 +130,10 @@ paddlehubs.com/
 │     ├─ CourtBooking.jsx
 │     ├─ MatchDetails.jsx
 │     ├─ Tournaments.jsx
-│     ├─ TournamentDetails.jsx
-│     ├─ Rankings.jsx          # team standings, per tournament
-│     ├─ PlayerRankings.jsx    # individual player standings, club-wide
+│     ├─ TournamentDetails.jsx     # teams/players, standings, matches, per-game scoring
+│     ├─ Rankings.jsx              # team standings, per tournament
+│     ├─ PlayerRankings.jsx        # individual player standings, overall + per-tournament
+│     ├─ AdminUsers.jsx            # admin-only: registered users list (Cognito)
 │     ├─ Profile.jsx
 │     └─ AuthCallback.jsx
 ├─ package.json

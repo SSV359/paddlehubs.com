@@ -533,6 +533,90 @@ async function updateTournamentTeams({ sub }, isAdmin, tournamentId, body) {
   return updated?.item || null;
 }
 
+// ---------- MATCH SCHEDULE (round-robin plan, saved separately from actual matches) ----------
+function scheduleSk(tournamentId) {
+  return `TSCHEDULE#${tournamentId}`;
+}
+
+async function getTournamentSchedule(tournamentId) {
+  const res = await ddb.send(
+    new GetCommand({
+      TableName: EVENTS_TABLE,
+      Key: { clubId: CLUB_ID, sk: scheduleSk(tournamentId) },
+    })
+  );
+  return { rounds: res.Item?.rounds || [], updatedAt: res.Item?.updatedAt || null };
+}
+
+async function saveTournamentSchedule({ sub }, isAdmin, tournamentId, body) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found", statusCode: 404 };
+  const t = rec.item;
+
+  if (!isAdmin && t.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  const teams = Array.isArray(t.teams) ? t.teams : [];
+  const teamIds = new Set(teams.map((x) => String(x.id)));
+
+  const roundsIn = Array.isArray(body.rounds) ? body.rounds : [];
+  if (!roundsIn.length) return { error: "Provide rounds[]" };
+
+  const rounds = [];
+  for (const r of roundsIn) {
+    const round = Number(r.round);
+    const date = trim(r.date);
+    const fixturesIn = Array.isArray(r.fixtures) ? r.fixtures : [];
+
+    if (!Number.isFinite(round) || round < 1) return { error: "Each round needs a valid round number" };
+
+    const fixtures = [];
+    for (const f of fixturesIn) {
+      const teamAId = trim(f.teamAId);
+      const teamBId = trim(f.teamBId);
+      if (!teamAId || !teamBId) return { error: "Each fixture needs teamAId and teamBId" };
+      if (!teamIds.has(teamAId) || !teamIds.has(teamBId)) {
+        return { error: "Fixture references a team not on this tournament's roster" };
+      }
+
+      const gamesPlayed = Math.min(6, Math.max(1, Math.round(Number(f.gamesPlayed ?? 1)) || 1));
+      const teamAPlayers = (Array.isArray(f.teamAPlayers) ? f.teamAPlayers : []).map((p) => trim(p)).filter(Boolean);
+      const teamBPlayers = (Array.isArray(f.teamBPlayers) ? f.teamBPlayers : []).map((p) => trim(p)).filter(Boolean);
+
+      fixtures.push({
+        teamAId,
+        teamBId,
+        court: trim(f.court) || "Court 1",
+        gameType: f.gameType === "singles" ? "singles" : "doubles",
+        gamesPlayed,
+        teamAPlayers,
+        teamBPlayers,
+        matchId: f.matchId ? String(f.matchId) : "", // set once a real match is recorded from this fixture
+      });
+    }
+
+    rounds.push({ round, date, fixtures });
+  }
+
+  const now = new Date().toISOString();
+
+  await ddb.send(
+    new PutCommand({
+      TableName: EVENTS_TABLE,
+      Item: {
+        clubId: CLUB_ID,
+        sk: scheduleSk(tournamentId),
+        type: "TSCHEDULE",
+        tournamentId,
+        rounds,
+        updatedBySub: sub,
+        updatedAt: now,
+      },
+    })
+  );
+
+  return { rounds, updatedAt: now };
+}
+
 async function deleteTournamentAuthorized({ sub }, isAdmin, tournamentId) {
   const rec = await getTournamentRecord(tournamentId);
   if (!rec) return { error: "Tournament not found", statusCode: 404 };
@@ -546,6 +630,17 @@ async function deleteTournamentAuthorized({ sub }, isAdmin, tournamentId) {
       Key: { clubId: CLUB_ID, sk: rec.sk },
     })
   );
+
+  // Best-effort cleanup of the saved schedule too — not fatal if it
+  // never existed (nothing was ever saved for this tournament).
+  try {
+    await ddb.send(
+      new DeleteCommand({
+        TableName: EVENTS_TABLE,
+        Key: { clubId: CLUB_ID, sk: scheduleSk(tournamentId) },
+      })
+    );
+  } catch {}
 
   return { ok: true };
 }
@@ -1153,6 +1248,23 @@ export async function handler(event) {
       if (!id) return json(400, { error: "Missing tournament id" });
 
       const r = await deleteTournamentAuthorized({ sub: user.sub }, admin, id);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+
+      return json(200, r);
+    }
+
+    // Match schedule (round-robin plan, editable by owner/admin, separate from actual recorded matches)
+    if (routeKey === "GET /tournaments/{id}/schedule") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+      return json(200, await getTournamentSchedule(id));
+    }
+
+    if (routeKey === "PUT /tournaments/{id}/schedule") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const r = await saveTournamentSchedule({ sub: user.sub }, admin, id, body);
       if (r?.error) return json(r.statusCode || 400, { error: r.error });
 
       return json(200, r);

@@ -140,6 +140,36 @@ A team with no saved roster shows a prompt to save teams first. Picking
 fewer than the required number, or the same player twice on one side, is
 blocked client-side and server-side with a clear error message.
 
+### Round-robin match schedule (saved, editable)
+
+A "Match Schedule" section on the Tournament page generates a full
+round-robin plan from that tournament's saved teams — every team plays
+every other team exactly once, scaling to however many teams exist (odd
+counts get a "bye" each round automatically). This is genuinely
+per-tournament and dynamic: it reads `tournament.teams` at generation
+time, nothing is hardcoded to any specific team count.
+
+- **Format**: "Normal" (1 game per fixture) or "MLP style" (4 games per
+  fixture) — sets the default `gamesPlayed` for generated fixtures.
+- **Persisted separately from real matches**: stored as its own DynamoDB
+  item (`TSCHEDULE#{tournamentId}`) via `GET`/`PUT
+  /tournaments/{id}/schedule` — a schedule is a *plan*, not a `TMATCH`
+  record. Generating or editing it never creates real matches.
+- **Editable per fixture**: court, games count, and the actual players
+  (from each team's saved roster) can be set inline in the schedule
+  table, then persisted with **Save Schedule**. Same owner/admin
+  authorization as team setup (`updateTournamentTeams` pattern).
+- **"Use" button**: loads a fixture's teams/court/date/players straight
+  into the existing Add Match form, so recording the real result still
+  goes through the exact same validated flow (player requirements,
+  games-won winner logic, etc.) as adding a match manually.
+
+**New API Gateway routes needed** (same authorizer-attachment step as
+every other route added in this project): `GET
+/tournaments/{id}/schedule` and `PUT /tournaments/{id}/schedule`, both
+with the `paddlehubs-cognito-jwt` authorizer attached and deployed to
+your stage.
+
 ## 6. Feature: Registered Users (Admin)
 
 Lists everyone signed up for PaddleHubs, pulled live from Cognito — not

@@ -100,34 +100,34 @@ export default function Tournaments() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-white/5 to-fuchsia-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="text-2xl font-semibold">Tournaments</div>
-        <div className="text-sm text-white/70 mt-1">Create tournaments, setup teams, and track standings.</div>
+        <div className="text-sm text-muted mt-1">Create tournaments, setup teams, and track standings.</div>
       </div>
 
       {err && (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {err}
         </div>
       )}
       {msg && (
-        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
           {msg}
         </div>
       )}
 
       {!loggedIn ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white/70">Please login.</div>
+        <div className="rounded-2xl border border-line bg-surface p-6 text-muted">Please login.</div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Create */}
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Create tournament</div>
               <button
                 onClick={load}
                 disabled={loading}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
               >
                 Refresh
               </button>
@@ -135,37 +135,37 @@ export default function Tournaments() {
 
             <form onSubmit={onCreate} className="mt-4 space-y-3">
               <div>
-                <label className="text-xs text-white/60">Tournament Name</label>
+                <label className="text-xs text-muted">Tournament Name</label>
                 <input
                   name="name"
                   value={form.name}
                   onChange={onChange}
                   placeholder="e.g., Winter Open 2026"
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                  className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                   disabled={loading}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-white/60">Start Date</label>
+                  <label className="text-xs text-muted">Start Date</label>
                   <input
                     type="date"
                     name="startDate"
                     value={form.startDate}
                     onChange={onChange}
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                     disabled={loading}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-white/60">End Date</label>
+                  <label className="text-xs text-muted">End Date</label>
                   <input
                     type="date"
                     name="endDate"
                     value={form.endDate}
                     onChange={onChange}
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                     disabled={loading}
                   />
                 </div>
@@ -173,7 +173,7 @@ export default function Tournaments() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-white/60">How many teams?</label>
+                  <label className="text-xs text-muted">How many teams?</label>
                   <input
                     type="number"
                     name="teamCount"
@@ -181,12 +181,12 @@ export default function Tournaments() {
                     onChange={onChange}
                     min={1}
                     max={64}
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                     disabled={loading}
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-white/60">Players per team</label>
+                  <label className="text-xs text-muted">Players per team</label>
                   <input
                     type="number"
                     name="playersPerTeam"
@@ -194,46 +194,46 @@ export default function Tournaments() {
                     onChange={onChange}
                     min={1}
                     max={20}
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                     disabled={loading}
                   />
                 </div>
               </div>
 
               <button
-                className="w-full rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 py-2.5 font-semibold disabled:opacity-40"
+                className="w-full rounded-2xl bg-surface2 hover:bg-line border border-line py-2.5 font-semibold disabled:opacity-40"
                 disabled={loading}
               >
                 {loading ? "Creating..." : "Create Tournament"}
               </button>
 
-              <div className="text-xs text-white/60">
+              <div className="text-xs text-muted">
                 After creation, setup team names + players inside the tournament.
               </div>
             </form>
           </div>
 
           {/* List */}
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="font-semibold">All tournaments</div>
-              <div className="text-xs text-white/60">{sorted.length}</div>
+              <div className="text-xs text-muted">{sorted.length}</div>
             </div>
 
             <div className="mt-4 space-y-3">
               {sorted.length === 0 ? (
-                <div className="text-sm text-white/70">No tournaments yet.</div>
+                <div className="text-sm text-muted">No tournaments yet.</div>
               ) : (
                 sorted.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => navigate(`/tournaments/${t.id}`)}
                     className={classNames(
-                      "w-full text-left rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 p-4"
+                      "w-full text-left rounded-xl border border-line bg-surface2 hover:bg-surface2 p-4"
                     )}
                   >
                     <div className="font-semibold">{t.name || "Tournament"}</div>
-                    <div className="text-xs text-white/60 mt-1">
+                    <div className="text-xs text-muted mt-1">
                       {t.startDate || "—"} → {t.endDate || "—"} • {t.status || "ACTIVE"}
                     </div>
                   </button>

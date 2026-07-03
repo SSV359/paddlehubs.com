@@ -82,34 +82,34 @@ export default function TournamentTeamsSetup({
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div className="font-semibold">Teams & Players</div>
-        {!canEdit ? <div className="text-xs text-white/60">Owner/Admin only</div> : null}
+        {!canEdit ? <div className="text-xs text-muted">Owner/Admin only</div> : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-white/60"># Teams</label>
+          <label className="text-xs text-muted"># Teams</label>
           <input
             type="number"
             value={teamCount}
             min={1}
             max={64}
             onChange={(e) => setTeamCount(e.target.value)}
-            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+            className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
             disabled={!canEdit || loading}
           />
         </div>
         <div>
-          <label className="text-xs text-white/60">Players/Team</label>
+          <label className="text-xs text-muted">Players/Team</label>
           <input
             type="number"
             value={playersPerTeam}
             min={1}
             max={20}
             onChange={(e) => setPlayersPerTeam(e.target.value)}
-            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+            className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
             disabled={!canEdit || loading}
           />
         </div>
@@ -120,7 +120,7 @@ export default function TournamentTeamsSetup({
         onClick={buildInputs}
         className={classNames(
           "mt-3 w-full rounded-2xl border py-2 text-sm",
-          "border-white/10 bg-white/5 hover:bg-white/10",
+          "border-line bg-surface2 hover:bg-surface2",
           (!canEdit || loading) ? "opacity-40" : ""
         )}
         disabled={!canEdit || loading}
@@ -136,12 +136,12 @@ export default function TournamentTeamsSetup({
 
       <div className="mt-4 space-y-4">
         {(teams || []).map((t, idx) => (
-          <div key={idx} className="rounded-2xl border border-white/10 bg-white/5 p-3">
-            <label className="text-xs text-white/60">Team {idx + 1} name</label>
+          <div key={idx} className="rounded-xl border border-line bg-surface2 p-3">
+            <label className="text-xs text-muted">Team {idx + 1} name</label>
             <input
               value={t.name}
               onChange={(e) => setTeamName(idx, e.target.value)}
-              className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+              className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
               disabled={!canEdit || loading}
             />
 
@@ -152,7 +152,7 @@ export default function TournamentTeamsSetup({
                   value={p}
                   onChange={(e) => setPlayer(idx, pIdx, e.target.value)}
                   placeholder={`Player ${pIdx + 1}`}
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                  className="w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                   disabled={!canEdit || loading}
                 />
               ))}
@@ -166,7 +166,7 @@ export default function TournamentTeamsSetup({
         onClick={save}
         className={classNames(
           "mt-4 w-full rounded-2xl border py-2.5 font-semibold",
-          "border-white/10 bg-white/10 hover:bg-white/15",
+          "border-line bg-surface2 hover:bg-line",
           (!canEdit || loading) ? "opacity-40" : ""
         )}
         disabled={!canEdit || loading}

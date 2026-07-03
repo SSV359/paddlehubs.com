@@ -1,9 +1,50 @@
 // /opt/paddlehubs-site/src/lib/auth.js
 // Cognito Hosted UI (PKCE) + token storage + helpers for ID/access token + claim helpers
+//
+// Works unchanged on the website. On the native iOS/Android apps (via
+// Capacitor), the OAuth redirect can't land on a regular https:// page
+// inside the app, so we swap in a custom URL scheme redirect/logout URI
+// and open the Hosted UI in the system browser instead of the in-app
+// webview — this is the standard, recommended pattern for mobile OAuth
+// (RFC 8252). None of this runs or matters on the web build.
+
+import { Capacitor } from "@capacitor/core";
 
 const AUTH_KEY = "ph_auth";
 const PKCE_KEY = "ph_pkce_verifier";
 const AUTH_EVENT = "ph_auth_changed";
+
+const NATIVE_REDIRECT_URI = import.meta.env.VITE_COGNITO_NATIVE_REDIRECT_URI || "paddlehubs://auth/callback";
+const NATIVE_LOGOUT_URI = import.meta.env.VITE_COGNITO_NATIVE_LOGOUT_URI || "paddlehubs://logout";
+
+function isNative() {
+  try {
+    return Capacitor.isNativePlatform();
+  } catch {
+    return false;
+  }
+}
+
+function currentRedirectUri() {
+  return isNative() ? NATIVE_REDIRECT_URI : import.meta.env.VITE_COGNITO_REDIRECT_URI;
+}
+
+function currentLogoutUri() {
+  return isNative() ? NATIVE_LOGOUT_URI : import.meta.env.VITE_COGNITO_LOGOUT_URI;
+}
+
+/**
+ * Opens a Cognito Hosted UI URL (login or logout) the right way for the
+ * current platform: system browser on native, normal navigation on web.
+ */
+export async function openAuthUrl(url) {
+  if (isNative()) {
+    const { Browser } = await import("@capacitor/browser");
+    await Browser.open({ url });
+  } else {
+    window.location.href = url;
+  }
+}
 
 function emitAuthChanged() {
   try {
@@ -68,7 +109,7 @@ async function sha256(verifier) {
 export async function loginUrl() {
   const domain = import.meta.env.VITE_COGNITO_DOMAIN;
   const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
-  const redirectUri = import.meta.env.VITE_COGNITO_REDIRECT_URI;
+  const redirectUri = currentRedirectUri();
 
   const verifier = randomVerifier();
   localStorage.setItem(PKCE_KEY, verifier);
@@ -90,7 +131,7 @@ export async function loginUrl() {
 export function logoutUrl() {
   const domain = import.meta.env.VITE_COGNITO_DOMAIN;
   const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
-  const logoutUri = import.meta.env.VITE_COGNITO_LOGOUT_URI;
+  const logoutUri = currentLogoutUri();
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -108,7 +149,7 @@ export async function exchangeCodeForTokens(code) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: import.meta.env.VITE_COGNITO_CLIENT_ID,
-    redirect_uri: import.meta.env.VITE_COGNITO_REDIRECT_URI,
+    redirect_uri: currentRedirectUri(),
     code,
     code_verifier: verifier,
   });
@@ -127,6 +168,14 @@ export async function exchangeCodeForTokens(code) {
   const tokens = await res.json();
   setAuth(tokens);
   localStorage.removeItem(PKCE_KEY);
+
+  if (isNative()) {
+    try {
+      const { Browser } = await import("@capacitor/browser");
+      await Browser.close();
+    } catch {}
+  }
+
   return tokens;
 }
 

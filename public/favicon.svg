@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 10 260 390">
+  <rect x="70" y="30" width="220" height="250" rx="64" fill="#155E9E" />
+  <rect x="84" y="44" width="192" height="222" rx="52" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="6" />
+  <rect x="150" y="280" width="60" height="95" rx="22" fill="#155E9E" />
+  <circle cx="120" cy="90" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="160" cy="90" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="200" cy="90" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="240" cy="90" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="100" cy="130" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="140" cy="130" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="180" cy="130" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="220" cy="130" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="260" cy="130" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="120" cy="170" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="160" cy="170" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="200" cy="170" r="15" fill="#D6FF3D" />
+  <circle cx="240" cy="170" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="100" cy="210" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="140" cy="210" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="180" cy="210" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="220" cy="210" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+  <circle cx="260" cy="210" r="8" fill="#FFFFFF" fill-opacity="0.32" />
+</svg>

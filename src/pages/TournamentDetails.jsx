@@ -19,6 +19,35 @@ function medalForRank(rank) {
   return "";
 }
 
+function SectionHeader({ title, count, open, onToggle, right }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-2 rounded-lg px-1 py-0.5 text-left transition hover:opacity-80"
+        aria-expanded={open}
+      >
+        <span
+          className={classNames(
+            "inline-block text-muted transition-transform duration-150",
+            open ? "rotate-90" : "rotate-0"
+          )}
+        >
+          ▶
+        </span>
+        <span className="font-display text-xl font-bold tracking-tight">{title}</span>
+        {count != null && (
+          <span className="rounded-full border border-line bg-surface2 px-2.5 py-0.5 text-xs text-muted">
+            {count}
+          </span>
+        )}
+      </button>
+      {right}
+    </div>
+  );
+}
+
 export default function TournamentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -34,6 +63,16 @@ export default function TournamentDetails() {
 
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  // Collapsible sections — keeps the page shorter; each can be expanded on demand.
+  const [teamsOpen, setTeamsOpen] = useState(true);
+  const [standingsOpen, setStandingsOpen] = useState(true);
+  const [matchesOpen, setMatchesOpen] = useState(true);
+
+  // Matches table: text filter + sort direction
+  const [matchQuery, setMatchQuery] = useState("");
+  const [matchSortAsc, setMatchSortAsc] = useState(false);
 
   const [setup, setSetup] = useState({
     teamCount: 4,
@@ -47,9 +86,11 @@ export default function TournamentDetails() {
     gameType: "doubles",
     teamAId: "",
     teamBId: "",
+    teamAPlayers: ["", ""],
+    teamBPlayers: ["", ""],
     winnerTeamId: "",
-    scoreA: 11,
-    scoreB: 7,
+    games: [{ a: 11, b: 7 }],
+    gamesPlayed: 1,
     notes: "",
   });
 
@@ -194,9 +235,61 @@ export default function TournamentDetails() {
     }
   }
 
+  const requiredPerSide = form.gameType === "singles" ? 1 : 2;
+
+  function resizePlayers(arr, size) {
+    const next = (arr || []).slice(0, size);
+    while (next.length < size) next.push("");
+    return next;
+  }
+
+  function resizeGames(arr, size) {
+    const next = (arr || []).slice(0, size);
+    while (next.length < size) next.push({ a: "", b: "" });
+    return next;
+  }
+
   function onFormChange(e) {
     const { name, value } = e.target;
-    setForm((f) => ({ ...f, [name]: value }));
+
+    setForm((f) => {
+      const next = { ...f, [name]: value };
+
+      if (name === "gameType") {
+        const size = value === "singles" ? 1 : 2;
+        next.teamAPlayers = resizePlayers(f.teamAPlayers, size);
+        next.teamBPlayers = resizePlayers(f.teamBPlayers, size);
+      }
+
+      if (name === "gamesPlayed") {
+        const size = Math.min(6, Math.max(1, Number(value) || 1));
+        next.gamesPlayed = size;
+        next.games = resizeGames(f.games, size);
+      }
+
+      // Team changed -> that side's roster changed, clear picked players for that side
+      if (name === "teamAId") next.teamAPlayers = resizePlayers([], requiredPerSide);
+      if (name === "teamBId") next.teamBPlayers = resizePlayers([], requiredPerSide);
+
+      return next;
+    });
+  }
+
+  function setGameScore(idx, side, value) {
+    setForm((f) => {
+      const games = resizeGames(f.games, f.gamesPlayed).slice();
+      games[idx] = { ...games[idx], [side]: value };
+      return { ...f, games };
+    });
+  }
+
+  function setMatchPlayer(side, idx, value) {
+    setForm((f) => {
+      const key = side === "A" ? "teamAPlayers" : "teamBPlayers";
+      const arr = resizePlayers(f[key], requiredPerSide).slice();
+      arr[idx] = value;
+      return { ...f, [key]: arr };
+    });
   }
 
   const matchupPreview = useMemo(() => {
@@ -217,15 +310,44 @@ export default function TournamentDetails() {
     if (!form.teamAId || !form.teamBId) return setErr("Pick Team A and Team B.");
     if (form.teamAId === form.teamBId) return setErr("Team A and Team B must be different.");
 
+    const teamAPlayers = (form.teamAPlayers || []).map((p) => trim(p)).filter(Boolean);
+    const teamBPlayers = (form.teamBPlayers || []).map((p) => trim(p)).filter(Boolean);
+    const label = form.gameType === "singles" ? "Singles" : "Doubles";
+
+    if (teamAPlayers.length !== requiredPerSide || teamBPlayers.length !== requiredPerSide) {
+      return setErr(
+        `${label} matches need exactly ${requiredPerSide} player${requiredPerSide > 1 ? "s" : ""} picked for each team.`
+      );
+    }
+    if (new Set(teamAPlayers).size !== teamAPlayers.length || new Set(teamBPlayers).size !== teamBPlayers.length) {
+      return setErr("Each player can only be picked once per team for this match.");
+    }
+
+    const gamesPlayed = Math.round(Number(form.gamesPlayed));
+    if (!Number.isInteger(gamesPlayed) || gamesPlayed < 1 || gamesPlayed > 6) {
+      return setErr("Games played must be between 1 and 6.");
+    }
+
+    const games = resizeGames(form.games, gamesPlayed).map((g) => ({
+      a: Number(g.a),
+      b: Number(g.b),
+    }));
+
+    if (games.some((g) => !Number.isFinite(g.a) || !Number.isFinite(g.b) || g.a < 0 || g.b < 0)) {
+      return setErr(`Enter a score for both teams in all ${gamesPlayed} game${gamesPlayed > 1 ? "s" : ""}.`);
+    }
+
     const payload = {
       date: trim(form.date),
       court: form.court,
       gameType: form.gameType,
       teamAId: String(form.teamAId),
       teamBId: String(form.teamBId),
+      teamAPlayers,
+      teamBPlayers,
       winnerTeamId: form.winnerTeamId ? String(form.winnerTeamId) : "",
-      scoreA: Number(form.scoreA),
-      scoreB: Number(form.scoreB),
+      games,
+      gamesPlayed,
       notes: trim(form.notes),
     };
 
@@ -247,9 +369,11 @@ export default function TournamentDetails() {
         date: "",
         teamAId: "",
         teamBId: "",
+        teamAPlayers: resizePlayers([], requiredPerSide),
+        teamBPlayers: resizePlayers([], requiredPerSide),
         winnerTeamId: "",
-        scoreA: 11,
-        scoreB: 7,
+        games: [{ a: 11, b: 7 }],
+        gamesPlayed: 1,
         notes: "",
       }));
     } catch (e2) {
@@ -310,34 +434,55 @@ export default function TournamentDetails() {
   }
 
   const sortedMatches = useMemo(() => {
-    return (matches || [])
-      .slice()
-      .sort((a, b) =>
-        (String(b.date || "") + String(b.createdAt || "")).localeCompare(
-          String(a.date || "") + String(a.createdAt || "")
-        )
-      );
-  }, [matches]);
+    const q = trim(matchQuery).toLowerCase();
+
+    const filtered = !q
+      ? matches || []
+      : (matches || []).filter((m) => {
+          const haystack = [
+            m.matchup,
+            m.court,
+            m.gameType,
+            m.winner,
+            m.notes,
+            m.date,
+            ...(Array.isArray(m.teamAPlayers) ? m.teamAPlayers : []),
+            ...(Array.isArray(m.teamBPlayers) ? m.teamBPlayers : []),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(q);
+        });
+
+    const sorted = filtered.slice().sort((a, b) =>
+      (String(b.date || "") + String(b.createdAt || "")).localeCompare(
+        String(a.date || "") + String(a.createdAt || "")
+      )
+    );
+
+    return matchSortAsc ? sorted.reverse() : sorted;
+  }, [matches, matchQuery, matchSortAsc]);
 
   const teamsReady = (tournament?.teams || []).length > 0;
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-white/5 to-emerald-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-2xl font-semibold">{tournament?.name || "Tournament"}</div>
-            <div className="text-sm text-white/70 mt-1">
+            <div className="text-sm text-muted mt-1">
               {tournament?.startDate || "—"} → {tournament?.endDate || "—"} •{" "}
               <span className="font-semibold">{String(tournament?.status || "ACTIVE")}</span>
               {admin ? (
-                <span className="ml-2 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px]">
+                <span className="ml-2 inline-flex items-center rounded-full border border-line bg-surface2 px-2 py-0.5 text-[11px]">
                   Admin
                 </span>
               ) : null}
             </div>
             {tournament?.ownerDisplayName ? (
-              <div className="text-xs text-white/50 mt-1">Created by: {tournament.ownerDisplayName}</div>
+              <div className="text-xs text-muted mt-1">Created by: {tournament.ownerDisplayName}</div>
             ) : null}
           </div>
 
@@ -354,7 +499,7 @@ export default function TournamentDetails() {
 
             <button
               onClick={() => navigate("/tournaments")}
-              className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs"
+              className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs"
             >
               Back
             </button>
@@ -363,58 +508,65 @@ export default function TournamentDetails() {
       </div>
 
       {err && (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">{err}</div>
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{err}</div>
       )}
       {msg && (
-        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
           {msg}
         </div>
       )}
 
       {!loggedIn ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white/70">Please login.</div>
+        <div className="rounded-2xl border border-line bg-surface p-6 text-muted">Please login.</div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* LEFT: Team Setup */}
-          <div className="xl:col-span-1 rounded-3xl border border-white/10 bg-white/5 p-5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">Teams & Players</div>
-              <button
-                type="button"
-                onClick={loadAll}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
-                disabled={loading}
-              >
-                Refresh
-              </button>
-            </div>
+        <div className="grid grid-cols-1 gap-6">
+          {/* Teams & Players — compact roster table */}
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+            <SectionHeader
+              title="Teams & Players"
+              open={teamsOpen}
+              onToggle={() => setTeamsOpen((v) => !v)}
+              right={
+                <button
+                  type="button"
+                  onClick={loadAll}
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:bg-line disabled:opacity-40"
+                  disabled={loading}
+                >
+                  Refresh
+                </button>
+              }
+            />
+
+            {teamsOpen && (
+              <>
 
             {!canEditTournament ? (
-              <div className="mt-3 text-xs text-white/60">Only owner/admin can edit teams.</div>
+              <div className="mt-3 text-xs text-muted">Only owner/admin can edit teams.</div>
             ) : null}
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-white/60"># Teams</label>
+                <label className="text-xs text-muted"># Teams</label>
                 <input
                   type="number"
                   name="teamCount"
                   value={setup.teamCount}
                   onChange={onSetupChange}
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                  className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                   min={1}
                   max={64}
                   disabled={loading || !canEditTournament}
                 />
               </div>
               <div>
-                <label className="text-xs text-white/60">Players/Team</label>
+                <label className="text-xs text-muted">Players/Team</label>
                 <input
                   type="number"
                   name="playersPerTeam"
                   value={setup.playersPerTeam}
                   onChange={onSetupChange}
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                  className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                   min={1}
                   max={20}
                   disabled={loading || !canEditTournament}
@@ -425,110 +577,142 @@ export default function TournamentDetails() {
             <button
               type="button"
               onClick={rebuildTeams}
-              className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 py-2 text-sm disabled:opacity-40"
+              className="mt-3 w-full rounded-xl border border-line bg-surface2 py-2 text-sm font-medium transition hover:bg-line disabled:opacity-40"
               disabled={loading || !canEditTournament}
             >
               Build Team Inputs
             </button>
 
-            <div className="mt-4 space-y-4">
-              {(setup.teams || []).map((t, idx) => (
-                <div key={idx} className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <label className="text-xs text-white/60">Team {idx + 1} name</label>
-                  <input
-                    value={t.name}
-                    onChange={(e) => setTeamName(idx, e.target.value)}
-                    className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                    disabled={loading || !canEditTournament}
-                  />
-
-                  <div className="mt-3 grid grid-cols-1 gap-2">
-                    {(t.players || []).map((p, pIdx) => (
-                      <input
-                        key={pIdx}
-                        value={p}
-                        onChange={(e) => setPlayer(idx, pIdx, e.target.value)}
-                        placeholder={`Player ${pIdx + 1}`}
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                        disabled={loading || !canEditTournament}
-                      />
+            {/* Roster table: one row per team, one column per player slot */}
+            <div className="mt-4 overflow-x-auto rounded-xl border border-line">
+              <table className="w-full min-w-[480px] text-sm">
+                <thead className="bg-surface2 text-xs uppercase tracking-wide text-muted">
+                  <tr>
+                    <th className="whitespace-nowrap px-3 py-2.5 text-left">Team</th>
+                    {Array.from({ length: Number(setup.playersPerTeam) || 0 }).map((_, pIdx) => (
+                      <th key={pIdx} className="whitespace-nowrap px-3 py-2.5 text-left">
+                        Player {pIdx + 1}
+                      </th>
                     ))}
-                  </div>
-                </div>
-              ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(setup.teams || []).map((t, idx) => (
+                    <tr key={idx} className="border-t border-line">
+                      <td className="px-3 py-2.5">
+                        <input
+                          value={t.name}
+                          onChange={(e) => setTeamName(idx, e.target.value)}
+                          placeholder={`Team ${idx + 1}`}
+                          className="w-full min-w-[110px] rounded-lg border border-line bg-surface2 px-2.5 py-1.5 font-medium"
+                          disabled={loading || !canEditTournament}
+                        />
+                      </td>
+                      {(t.players || []).map((p, pIdx) => (
+                        <td key={pIdx} className="px-3 py-2.5">
+                          <input
+                            value={p}
+                            onChange={(e) => setPlayer(idx, pIdx, e.target.value)}
+                            placeholder={`Player ${pIdx + 1}`}
+                            className="w-full min-w-[130px] rounded-lg border border-line bg-surface2 px-2.5 py-1.5"
+                            disabled={loading || !canEditTournament}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {(setup.teams || []).length === 0 && (
+                    <tr>
+                      <td className="px-3 py-4 text-sm text-muted" colSpan={99}>
+                        No teams yet — set the counts above and click "Build Team Inputs".
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             <button
               type="button"
               onClick={saveTeams}
-              className="mt-4 w-full rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 py-2.5 font-semibold disabled:opacity-40"
+              className="mt-4 w-full rounded-2xl border border-line bg-accent py-2.5 font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
               disabled={loading || !canEditTournament}
             >
               {loading ? "Saving..." : teamsReady ? "Update Teams" : "Save Teams"}
             </button>
 
             {!teamsReady ? (
-              <div className="mt-3 text-xs text-amber-200/80">
+              <div className="mt-3 text-xs text-amber-700 dark:text-amber-300">
                 ⚠️ Teams are not saved yet. Save teams first, then you can add matches and standings will work.
               </div>
             ) : null}
+              </>
+            )}
           </div>
 
-          {/* MIDDLE: Standings */}
-          <div className="xl:col-span-1 rounded-3xl border border-white/10 bg-white/5 p-5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">Team Standings</div>
-              <div className="text-xs text-white/60">{standings.length}</div>
-            </div>
+          {/* Team Standings */}
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+            <SectionHeader
+              title="Team Standings"
+              open={standingsOpen}
+              onToggle={() => setStandingsOpen((v) => !v)}
+              right={<span className="text-xs text-muted">{standings.length}</span>}
+            />
+
+            {standingsOpen && (
+              <>
 
             {!teamsReady ? (
-              <div className="mt-4 text-sm text-white/70">Save teams to see standings.</div>
+              <div className="mt-4 text-sm text-muted">Save teams to see standings.</div>
             ) : standings.length === 0 ? (
-              <div className="mt-4 text-sm text-white/70">No matches yet.</div>
+              <div className="mt-4 text-sm text-muted">No matches yet.</div>
             ) : (
-              <div className="mt-4 overflow-x-auto">
+              <div className="mt-4 overflow-x-auto rounded-xl border border-line">
                 <table className="w-full text-sm">
-                  <thead className="text-xs text-white/60">
+                  <thead className="bg-surface2 text-xs uppercase tracking-wide text-muted">
                     <tr>
-                      <th className="text-left py-2">#</th>
-                      <th className="text-left py-2">Team</th>
-                      <th className="text-right py-2">Pts</th>
-                      <th className="text-right py-2">W</th>
-                      <th className="text-right py-2">L</th>
-                      <th className="text-right py-2">T</th>
-                      <th className="text-right py-2">PF</th>
-                      <th className="text-right py-2">PA</th>
+                      <th className="py-2.5 pl-3 text-left">#</th>
+                      <th className="py-2.5 text-left">Team</th>
+                      <th className="py-2.5 pr-1 text-right">Pts</th>
+                      <th className="py-2.5 pr-1 text-right">W</th>
+                      <th className="py-2.5 pr-1 text-right">L</th>
+                      <th className="py-2.5 pr-1 text-right">T</th>
+                      <th className="py-2.5 pr-1 text-right">PF</th>
+                      <th className="py-2.5 pr-3 text-right">PA</th>
                     </tr>
                   </thead>
                   <tbody>
                     {standings.map((r) => (
                       <tr
                         key={r.teamId}
-                        className={classNames("border-t border-white/10", r.rank <= 3 ? "bg-white/5" : "")}
+                        className={classNames(
+                          "border-t border-line",
+                          r.rank <= 3 && "border-l-4 border-l-signature bg-surface2"
+                        )}
                       >
-                        {/* ✅ medal + rank */}
-                        <td className="py-2">
-                          <div className="flex items-center gap-2">
+                        <td className="py-2.5 pl-3">
+                          <div className="flex items-center gap-1.5">
                             <span className="w-5 text-center">{medalForRank(r.rank)}</span>
-                            <span>{r.rank}</span>
+                            <span className="stat-score">{r.rank}</span>
                           </div>
                         </td>
 
-                        <td className="py-2">
-                          <div className="font-semibold">
-                            {r.teamName}
-                            {r.rank <= 3 ? <span className="ml-2 text-xs text-white/60">Winner</span> : null}
-                          </div>
+                        <td className="py-2.5">
+                          <div className="font-semibold">{r.teamName}</div>
                           {(r.players || []).length ? (
-                            <div className="text-[11px] text-white/60">{r.players.join(", ")}</div>
+                            <div className="text-[11px] text-muted">{r.players.join(", ")}</div>
                           ) : null}
                         </td>
-                        <td className="py-2 text-right font-semibold">{r.points}</td>
-                        <td className="py-2 text-right">{r.wins}</td>
-                        <td className="py-2 text-right">{r.losses}</td>
-                        <td className="py-2 text-right">{r.ties}</td>
-                        <td className="py-2 text-right">{r.pointsFor}</td>
-                        <td className="py-2 text-right">{r.pointsAgainst}</td>
+                        <td className="stat-score py-2.5 pr-1 text-right font-semibold">{r.points}</td>
+                        <td className="stat-score py-2.5 pr-1 text-right text-emerald-700 dark:text-emerald-300">
+                          {r.wins}
+                        </td>
+                        <td className="stat-score py-2.5 pr-1 text-right text-red-700 dark:text-red-300">
+                          {r.losses}
+                        </td>
+                        <td className="stat-score py-2.5 pr-1 text-right text-muted">{r.ties}</td>
+                        <td className="stat-score py-2.5 pr-1 text-right text-muted">{r.pointsFor}</td>
+                        <td className="stat-score py-2.5 pr-3 text-right text-muted">{r.pointsAgainst}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -536,191 +720,349 @@ export default function TournamentDetails() {
               </div>
             )}
 
-            <div className="mt-3 text-xs text-white/60">
-              Points: Win={1}, Tie={0.5}, Loss={0} (MLP: WIN_POINTS / TIE_POINTS / LOSS_POINTS)
+            <div className="mt-3 text-xs text-muted">
+              Points: Win={1}, Tie={0.5}, Loss={0} (TEAM_WIN_POINTS / TEAM_TIE_POINTS / TEAM_LOSS_POINTS)
             </div>
+              </>
+            )}
           </div>
 
-          {/* RIGHT: Add match + list */}
-          <div className="xl:col-span-1 space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-              <div className="font-semibold">Add match</div>
-
-              {!teamsReady ? (
-                <div className="mt-3 text-sm text-white/70">Save teams first.</div>
-              ) : (
-                <form onSubmit={addMatch} className="mt-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="date"
-                      name="date"
-                      value={form.date}
-                      onChange={onFormChange}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      disabled={loading}
-                    />
-                    <select
-                      name="court"
-                      value={form.court}
-                      onChange={onFormChange}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      disabled={loading}
-                    >
-                      <option>Court 1</option>
-                      <option>Court 2</option>
-                      <option>Court 3</option>
-                      <option>Court 4</option>
-                    </select>
-                  </div>
-
-                  <select
-                    name="gameType"
-                    value={form.gameType}
-                    onChange={onFormChange}
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                    disabled={loading}
+          {/* Matches — Add Match panel on top of the matches table, full width */}
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+            <SectionHeader
+              title="Matches"
+              open={matchesOpen}
+              onToggle={() => setMatchesOpen((v) => !v)}
+              count={sortedMatches.length}
+              right={
+                teamsReady ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddForm((v) => !v)}
+                    className="rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-ink transition hover:opacity-90"
                   >
-                    <option value="doubles">Doubles</option>
-                    <option value="singles">Singles</option>
-                  </select>
+                    {showAddForm ? "Close" : "+ Add Match"}
+                  </button>
+                ) : null
+              }
+            />
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <select
-                      name="teamAId"
-                      value={form.teamAId}
-                      onChange={onFormChange}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      disabled={loading}
-                    >
-                      <option value="">Team A</option>
-                      {teams.map((t) => (
-                        <option key={t.id} value={String(t.id)}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      name="teamBId"
-                      value={form.teamBId}
-                      onChange={onFormChange}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      disabled={loading}
-                    >
-                      <option value="">Team B</option>
-                      {teams.map((t) => (
-                        <option key={t.id} value={String(t.id)}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+            {matchesOpen && (
+              <>
+            {teamsReady && (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={matchQuery}
+                  onChange={(e) => setMatchQuery(e.target.value)}
+                  placeholder="Filter matches (team, court, player, notes)…"
+                  className="min-w-[220px] flex-1 rounded-xl border border-line bg-surface2 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMatchSortAsc((v) => !v)}
+                  className="whitespace-nowrap rounded-xl border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:bg-line"
+                  title="Toggle sort order by date"
+                >
+                  {matchSortAsc ? "Oldest first ↑" : "Newest first ↓"}
+                </button>
+              </div>
+            )}
 
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm font-semibold">
-                    {matchupPreview}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="number"
-                      name="scoreA"
-                      value={form.scoreA}
-                      onChange={onFormChange}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      disabled={loading}
-                    />
-                    <input
-                      type="number"
-                      name="scoreB"
-                      value={form.scoreB}
-                      onChange={onFormChange}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      disabled={loading}
-                    />
-                  </div>
-
-                  <select
-                    name="winnerTeamId"
-                    value={form.winnerTeamId}
+            {!teamsReady ? (
+              <div className="mt-4 text-sm text-muted">Save teams first, then you can add matches here.</div>
+            ) : showAddForm ? (
+              <form onSubmit={addMatch} className="mt-4 space-y-3 rounded-xl border border-line bg-surface2 p-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <input
+                    type="date"
+                    name="date"
+                    value={form.date}
                     onChange={onFormChange}
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                    disabled={loading}
-                  >
-                    <option value="">Winner (auto from score if empty)</option>
-                    {form.teamAId ? (
-                      <option value={String(form.teamAId)}>
-                        Winner: {teamsById.get(String(form.teamAId))?.name || "Team A"}
-                      </option>
-                    ) : null}
-                    {form.teamBId ? (
-                      <option value={String(form.teamBId)}>
-                        Winner: {teamsById.get(String(form.teamBId))?.name || "Team B"}
-                      </option>
-                    ) : null}
-                    <option value="TIE">Tie</option>
-                  </select>
-
-                  <textarea
-                    name="notes"
-                    value={form.notes}
-                    onChange={onFormChange}
-                    rows="3"
-                    placeholder="Notes (optional)"
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                    className="rounded-xl border border-line bg-surface px-3 py-2"
                     disabled={loading}
                   />
-
-                  <button
-                    className="w-full rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 py-2.5 font-semibold disabled:opacity-40"
+                  <select
+                    name="court"
+                    value={form.court}
+                    onChange={onFormChange}
+                    className="rounded-xl border border-line bg-surface px-3 py-2"
                     disabled={loading}
                   >
-                    {loading ? "Saving..." : "Add Match"}
-                  </button>
-                </form>
-              )}
-            </div>
+                    <option>Court 1</option>
+                    <option>Court 2</option>
+                    <option>Court 3</option>
+                    <option>Court 4</option>
+                  </select>
+                </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold">Matches</div>
-                <div className="text-xs text-white/60">{sortedMatches.length}</div>
-              </div>
+                <select
+                  name="gameType"
+                  value={form.gameType}
+                  onChange={onFormChange}
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2"
+                  disabled={loading}
+                >
+                  <option value="doubles">Doubles</option>
+                  <option value="singles">Singles</option>
+                </select>
 
-              <div className="mt-4 space-y-3">
-                {sortedMatches.length === 0 ? (
-                  <div className="text-sm text-white/70">No matches yet.</div>
-                ) : (
-                  sortedMatches.map((m) => (
-                    <div key={m.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="font-semibold">{m.matchup || "Match"}</div>
-                          <div className="text-xs text-white/60 mt-1">
-                            {m.date || "—"} • {m.court || "—"} • {m.gameType || "—"}
-                          </div>
-                          <div className="text-xs text-white/60">
-                            Score: {m.scoreA ?? "—"} - {m.scoreB ?? "—"} • Winner:{" "}
-                            <span className="font-semibold">{m.winner || "—"}</span>
-                          </div>
-                          {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
-                        </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <select
+                    name="teamAId"
+                    value={form.teamAId}
+                    onChange={onFormChange}
+                    className="rounded-xl border border-line bg-surface px-3 py-2"
+                    disabled={loading}
+                  >
+                    <option value="">Team A</option>
+                    {teams.map((t) => (
+                      <option key={t.id} value={String(t.id)}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    name="teamBId"
+                    value={form.teamBId}
+                    onChange={onFormChange}
+                    className="rounded-xl border border-line bg-surface px-3 py-2"
+                    disabled={loading}
+                  >
+                    <option value="">Team B</option>
+                    {teams.map((t) => (
+                      <option key={t.id} value={String(t.id)}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                        {canDeleteMatch(m) ? (
-                          <button
-                            onClick={() => onDeleteMatch(m.id)}
-                            className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 px-2 py-1 text-[11px] disabled:opacity-40"
-                            disabled={loading}
-                          >
-                            Delete
-                          </button>
-                        ) : null}
-                      </div>
+                <div className="rounded-xl border border-line bg-surface px-3 py-2.5 text-sm font-semibold">
+                  {matchupPreview}
+                </div>
+
+                {/* Player pickers — required, sourced from each team's saved roster */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-xs uppercase tracking-wide text-muted">
+                      {teamsById.get(String(form.teamAId))?.name || "Team A"} — players
                     </div>
-                  ))
-                )}
-              </div>
+                    {Array.from({ length: requiredPerSide }).map((_, idx) => {
+                      const roster = teamsById.get(String(form.teamAId))?.players || [];
+                      return (
+                        <select
+                          key={idx}
+                          value={form.teamAPlayers?.[idx] || ""}
+                          onChange={(e) => setMatchPlayer("A", idx, e.target.value)}
+                          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                          disabled={loading || !form.teamAId}
+                        >
+                          <option value="">{roster.length ? `Player ${idx + 1}` : "No roster saved"}</option>
+                          {roster.map((p) => (
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
+                          ))}
+                        </select>
+                      );
+                    })}
+                    {form.teamAId && !(teamsById.get(String(form.teamAId))?.players || []).length && (
+                      <div className="text-[11px] text-muted">
+                        This team has no saved roster yet — add players above and save teams first.
+                      </div>
+                    )}
+                  </div>
 
-              <div className="mt-4 text-xs text-white/60">Standings update automatically when matches are added/deleted.</div>
+                  <div className="space-y-2">
+                    <div className="text-xs uppercase tracking-wide text-muted">
+                      {teamsById.get(String(form.teamBId))?.name || "Team B"} — players
+                    </div>
+                    {Array.from({ length: requiredPerSide }).map((_, idx) => {
+                      const roster = teamsById.get(String(form.teamBId))?.players || [];
+                      return (
+                        <select
+                          key={idx}
+                          value={form.teamBPlayers?.[idx] || ""}
+                          onChange={(e) => setMatchPlayer("B", idx, e.target.value)}
+                          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                          disabled={loading || !form.teamBId}
+                        >
+                          <option value="">{roster.length ? `Player ${idx + 1}` : "No roster saved"}</option>
+                          {roster.map((p) => (
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
+                          ))}
+                        </select>
+                      );
+                    })}
+                    {form.teamBId && !(teamsById.get(String(form.teamBId))?.players || []).length && (
+                      <div className="text-[11px] text-muted">
+                        This team has no saved roster yet — add players above and save teams first.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-muted">Games Played</label>
+                  <select
+                    name="gamesPlayed"
+                    value={form.gamesPlayed}
+                    onChange={onFormChange}
+                    className="mt-2 w-full rounded-xl border border-line bg-surface px-3 py-2"
+                    disabled={loading}
+                  >
+                    {[1, 2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>
+                        {n} {n === 1 ? "game" : "games"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[3.5rem_1fr_1fr] gap-3 text-xs uppercase tracking-wide text-muted">
+                    <span></span>
+                    <span>{teamsById.get(String(form.teamAId))?.name || "Team A"}</span>
+                    <span>{teamsById.get(String(form.teamBId))?.name || "Team B"}</span>
+                  </div>
+                  {Array.from({ length: form.gamesPlayed }).map((_, idx) => {
+                    const g = form.games?.[idx] || { a: "", b: "" };
+                    return (
+                      <div key={idx} className="grid grid-cols-[3.5rem_1fr_1fr] items-center gap-3">
+                        <span className="text-xs text-muted">Game {idx + 1}</span>
+                        <input
+                          type="number"
+                          value={g.a}
+                          onChange={(e) => setGameScore(idx, "a", e.target.value)}
+                          className="rounded-xl border border-line bg-surface px-3 py-2"
+                          disabled={loading}
+                        />
+                        <input
+                          type="number"
+                          value={g.b}
+                          onChange={(e) => setGameScore(idx, "b", e.target.value)}
+                          className="rounded-xl border border-line bg-surface px-3 py-2"
+                          disabled={loading}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <select
+                  name="winnerTeamId"
+                  value={form.winnerTeamId}
+                  onChange={onFormChange}
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2"
+                  disabled={loading}
+                >
+                  <option value="">Winner (auto from score if empty)</option>
+                  {form.teamAId ? (
+                    <option value={String(form.teamAId)}>
+                      Winner: {teamsById.get(String(form.teamAId))?.name || "Team A"}
+                    </option>
+                  ) : null}
+                  {form.teamBId ? (
+                    <option value={String(form.teamBId)}>
+                      Winner: {teamsById.get(String(form.teamBId))?.name || "Team B"}
+                    </option>
+                  ) : null}
+                  <option value="TIE">Tie</option>
+                </select>
+
+                <textarea
+                  name="notes"
+                  value={form.notes}
+                  onChange={onFormChange}
+                  rows="2"
+                  placeholder="Notes (optional)"
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2"
+                  disabled={loading}
+                />
+
+                <button
+                  className="w-full rounded-xl bg-accent py-2.5 font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
+                  disabled={loading}
+                >
+                  {loading ? "Saving..." : "Add Match"}
+                </button>
+              </form>
+            ) : null}
+
+            <div className="mt-4 overflow-x-auto rounded-xl border border-line">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="bg-surface2 text-xs uppercase tracking-wide text-muted">
+                  <tr>
+                    <th className="whitespace-nowrap py-2.5 pl-3 text-left">Date</th>
+                    <th className="whitespace-nowrap py-2.5 text-left">Court</th>
+                    <th className="whitespace-nowrap py-2.5 text-left">Type</th>
+                    <th className="whitespace-nowrap py-2.5 text-left">Matchup</th>
+                    <th className="whitespace-nowrap py-2.5 text-right">Score</th>
+                    <th className="whitespace-nowrap py-2.5 text-right">Games</th>
+                    <th className="whitespace-nowrap py-2.5 text-left">Winner</th>
+                    <th className="whitespace-nowrap py-2.5 text-left">Notes</th>
+                    <th className="whitespace-nowrap py-2.5 pr-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedMatches.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-sm text-muted" colSpan={9}>
+                        No matches yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    sortedMatches.map((m) => (
+                      <tr key={m.id} className="border-t border-line">
+                        <td className="whitespace-nowrap py-2.5 pl-3 text-muted">{m.date || "—"}</td>
+                        <td className="whitespace-nowrap py-2.5 text-muted">{m.court || "—"}</td>
+                        <td className="whitespace-nowrap py-2.5 text-muted capitalize">{m.gameType || "—"}</td>
+                        <td className="py-2.5 font-medium">{m.matchup || "Match"}</td>
+                        <td
+                          className="stat-score whitespace-nowrap py-2.5 text-right"
+                          title={
+                            Array.isArray(m.games) && m.games.length
+                              ? m.games.map((g, i) => `Game ${i + 1}: ${g.a}-${g.b}`).join(" · ")
+                              : ""
+                          }
+                        >
+                          {m.scoreA ?? "—"}&ndash;{m.scoreB ?? "—"}
+                        </td>
+                        <td className="stat-score whitespace-nowrap py-2.5 text-right text-muted">
+                          {m.gamesWonA != null && m.gamesWonB != null
+                            ? `${m.gamesWonA}-${m.gamesWonB}`
+                            : m.gamesPlayed ?? 1}
+                        </td>
+                        <td className="whitespace-nowrap py-2.5 font-semibold">{m.winner || "—"}</td>
+                        <td className="max-w-[220px] truncate py-2.5 text-muted" title={m.notes || ""}>
+                          {m.notes || "—"}
+                        </td>
+                        <td className="whitespace-nowrap py-2.5 pr-3 text-right">
+                          {canDeleteMatch(m) ? (
+                            <button
+                              onClick={() => onDeleteMatch(m.id)}
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-700 transition hover:bg-red-500/15 disabled:opacity-40 dark:text-red-300"
+                              disabled={loading}
+                            >
+                              Delete
+                            </button>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
+
+            <div className="mt-3 text-xs text-muted">Standings update automatically when matches are added/deleted.</div>
+              </>
+            )}
           </div>
         </div>
       )}

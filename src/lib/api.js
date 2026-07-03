@@ -1,5 +1,5 @@
 // /opt/paddlehubs-site/src/lib/api.js
-import { getAuth, isLoggedIn, clearAuth } from "./auth.js";
+import { getAuth, isLoggedIn } from "./auth.js";
 
 const API_BASE_RAW = import.meta.env.VITE_API_BASE;
 
@@ -40,8 +40,13 @@ async function req(path, { method = "GET", body } = {}) {
   }
 
   if (res.status === 401 || res.status === 403) {
-    clearAuth();
-    const msg = data?.error || data?.message || "Unauthorized. Please login again.";
+    // Note: we intentionally do NOT clear the session here. A single
+    // endpoint returning 401 (e.g. a misconfigured route or authorizer)
+    // used to log the whole app out even when the token was perfectly
+    // valid for every other request. Let the calling page show its own
+    // error; only an explicit Logout click or a failed token refresh
+    // should end the session.
+    const msg = data?.error || data?.message || "That request wasn't authorized. Try again or re-login.";
     throw new Error(msg);
   }
 
@@ -131,6 +136,19 @@ export const api = {
   // Standings
   getTournamentStandings(tournamentId) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/standings`);
+  },
+
+  // Player rankings
+  getPlayerRankings() {
+    return req(`/player-rankings`);
+  },
+  getTournamentPlayerRankings(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/player-rankings`);
+  },
+
+  // Admin
+  getAdminUsers() {
+    return req(`/admin/users`);
   },
 };
 

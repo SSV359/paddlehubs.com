@@ -51,9 +51,9 @@ function PodiumCard({ standings }) {
   function PodiumSpot({ item, label, medal, accent }) {
     if (!item) {
       return (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-xs text-white/60">{label}</div>
-          <div className="mt-1 text-sm text-white/60">—</div>
+        <div className="rounded-xl border border-line bg-surface2 p-4">
+          <div className="text-xs text-muted">{label}</div>
+          <div className="mt-1 text-sm text-muted">—</div>
         </div>
       );
     }
@@ -61,18 +61,18 @@ function PodiumCard({ standings }) {
     return (
       <div className={classNames("rounded-2xl border p-4", accent)}>
         <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-white/70">{label}</div>
+          <div className="text-xs text-muted">{label}</div>
           <div className="text-lg">{medal}</div>
         </div>
 
         <div className="mt-1 font-semibold">{item.teamName}</div>
 
         {(item.players || []).length ? (
-          <div className="mt-1 text-[11px] text-white/60">{item.players.join(", ")}</div>
+          <div className="mt-1 text-[11px] text-muted">{item.players.join(", ")}</div>
         ) : null}
 
         <div className="mt-3 flex items-center justify-between text-xs">
-          <span className="text-white/60">Points</span>
+          <span className="text-muted">Points</span>
           <span className="font-semibold">{item.points}</span>
         </div>
       </div>
@@ -80,17 +80,17 @@ function PodiumCard({ standings }) {
   }
 
   return (
-    <div className="mt-4 rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className="mt-4 rounded-2xl border border-line bg-surface p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="font-semibold">🏆 Podium — Top 3</div>
-          <div className="text-xs text-white/60 mt-1">Top teams so far (updates automatically).</div>
+          <div className="text-xs text-muted mt-1">Top teams so far (updates automatically).</div>
         </div>
 
         <img
           src={PODIUM_GIF}
           alt="podium gif"
-          className="h-16 w-16 rounded-2xl border border-white/10 object-cover"
+          className="h-16 w-16 rounded-2xl border border-line object-cover"
           loading="lazy"
         />
       </div>
@@ -100,19 +100,19 @@ function PodiumCard({ standings }) {
           item={first}
           label="Champion"
           medal="🥇"
-          accent="bg-gradient-to-br from-yellow-400/20 via-white/5 to-amber-400/15 border-yellow-400/25"
+          accent="bg-gradient-to-br from-yellow-400/20 via-surface2 to-amber-400/15 border-yellow-400/25"
         />
         <PodiumSpot
           item={second}
           label="Runner-up"
           medal="🥈"
-          accent="bg-gradient-to-br from-slate-200/15 via-white/5 to-slate-400/10 border-white/15"
+          accent="bg-gradient-to-br from-slate-200/15 via-surface2 to-slate-400/10 border-line"
         />
         <PodiumSpot
           item={third}
           label="3rd Place"
           medal="🥉"
-          accent="bg-gradient-to-br from-orange-500/15 via-white/5 to-amber-700/10 border-orange-400/15"
+          accent="bg-gradient-to-br from-orange-500/15 via-surface2 to-amber-700/10 border-orange-400/15"
         />
       </div>
     </div>
@@ -180,40 +180,40 @@ export default function Rankings() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-white/5 to-cyan-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="text-2xl font-semibold">Tournament Rankings</div>
-        <div className="text-sm text-white/70 mt-1">Select a tournament to view team standings.</div>
+        <div className="text-sm text-muted mt-1">Select a tournament to view team standings.</div>
       </div>
 
       {err && (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {err}
         </div>
       )}
 
       {!loggedIn ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white/70">
+        <div className="rounded-2xl border border-line bg-surface p-6 text-muted">
           Please login to view rankings.
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
           {/* Tournament list */}
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Tournaments</div>
               <button
                 onClick={loadTournaments}
                 disabled={loading}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
               >
                 Refresh
               </button>
             </div>
 
             {loading && tournaments.length === 0 ? (
-              <div className="mt-4 text-sm text-white/70">Loading...</div>
+              <div className="mt-4 text-sm text-muted">Loading...</div>
             ) : tournaments.length === 0 ? (
-              <div className="mt-4 text-sm text-white/70">No tournaments yet.</div>
+              <div className="mt-4 text-sm text-muted">No tournaments yet.</div>
             ) : (
               <div className="mt-4 space-y-2">
                 {tournaments.map((t) => {
@@ -227,8 +227,8 @@ export default function Rankings() {
                       className={classNames(
                         "w-full text-left rounded-2xl border px-3 py-3",
                         active
-                          ? "bg-gradient-to-r from-cyan-500/25 to-fuchsia-500/25 border-white/25"
-                          : "bg-white/5 border-white/10 hover:bg-white/10"
+                          ? "bg-gradient-to-r from-cyan-500/25 to-fuchsia-500/25 border-accent/40"
+                          : "bg-surface2 border-line hover:bg-surface2"
                       )}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -239,13 +239,13 @@ export default function Rankings() {
                             🔒 LOCKED
                           </span>
                         ) : (
-                          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                          <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
                             LIVE
                           </span>
                         )}
                       </div>
 
-                      <div className="text-xs text-white/60 mt-1">
+                      <div className="text-xs text-muted mt-1">
                         {t.startDate || "—"} → {t.endDate || "—"} • {t.status || "ACTIVE"}
                       </div>
                     </button>
@@ -256,7 +256,7 @@ export default function Rankings() {
           </div>
 
           {/* Standings table */}
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="font-semibold truncate">
@@ -269,22 +269,22 @@ export default function Rankings() {
                       Final (Locked)
                     </span>
                   ) : (
-                    <span className="shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                    <span className="shrink-0 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
                       Live
                     </span>
                   )
                 ) : null}
               </div>
 
-              <div className="text-xs text-white/60">{sortedStandings.length}</div>
+              <div className="text-xs text-muted">{sortedStandings.length}</div>
             </div>
 
             {!selected ? (
-              <div className="mt-4 text-sm text-white/70">Select a tournament.</div>
+              <div className="mt-4 text-sm text-muted">Select a tournament.</div>
             ) : loading && standings.length === 0 ? (
-              <div className="mt-4 text-sm text-white/70">Loading standings...</div>
+              <div className="mt-4 text-sm text-muted">Loading standings...</div>
             ) : sortedStandings.length === 0 ? (
-              <div className="mt-4 text-sm text-white/70">No teams/matches yet for this tournament.</div>
+              <div className="mt-4 text-sm text-muted">No teams/matches yet for this tournament.</div>
             ) : (
               <>
                 {/* ✅ Podium Card */}
@@ -292,7 +292,7 @@ export default function Rankings() {
 
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="text-xs text-white/60">
+                    <thead className="text-xs text-muted">
                       <tr>
                         <th className="text-left py-2 pr-2">#</th>
                         <th className="text-left py-2 pr-2">Team</th>
@@ -314,11 +314,11 @@ export default function Rankings() {
                           <tr
                             key={r.teamId}
                             className={classNames(
-                              "border-t border-white/10",
+                              "border-t border-line",
                               isChampion
-                                ? "bg-gradient-to-r from-yellow-400/20 via-white/5 to-amber-400/15 ring-1 ring-yellow-400/30"
+                                ? "bg-gradient-to-r from-yellow-400/20 via-surface2 to-amber-400/15 ring-1 ring-yellow-400/30"
                                 : isTop3
-                                ? "bg-white/5"
+                                ? "bg-surface2"
                                 : ""
                             )}
                           >
@@ -335,14 +335,14 @@ export default function Rankings() {
                                   {r.teamName}
                                 </div>
                                 {isChampion ? (
-                                  <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-2 py-0.5 text-[10px] text-yellow-200">
+                                  <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
                                     🏆 Champion
                                   </span>
                                 ) : null}
                               </div>
 
                               {(r.players || []).length ? (
-                                <div className="text-[11px] text-white/60">{r.players.join(", ")}</div>
+                                <div className="text-[11px] text-muted">{r.players.join(", ")}</div>
                               ) : null}
                             </td>
 
@@ -363,7 +363,7 @@ export default function Rankings() {
               </>
             )}
 
-            <div className="mt-3 text-xs text-white/60">
+            <div className="mt-3 text-xs text-muted">
               Points: Win={1}, Tie={0.5}, Loss={0} (MLP : WIN_POINTS / TIE_POINTS / LOSS_POINTS)
             </div>
           </div>

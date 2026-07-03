@@ -65,56 +65,56 @@ export default function Profile() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-sky-500/15 via-white/5 to-indigo-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="text-2xl font-semibold">My Profile</div>
-        <div className="text-sm text-white/70 mt-1">
+        <div className="text-sm text-muted mt-1">
           Set your player display name (Phase II — saved in DynamoDB)
         </div>
       </div>
 
       {err && (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {err}
         </div>
       )}
       {msg && (
-        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
           {msg}
         </div>
       )}
 
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+      <div className="rounded-2xl border border-line bg-surface p-6 shadow-sm">
         {!loggedIn ? (
-          <div className="text-white/70">Please login to update your profile.</div>
+          <div className="text-muted">Please login to update your profile.</div>
         ) : (
           <>
-            <div className="text-sm text-white/70">
+            <div className="text-sm text-muted">
               Logged in as: <span className="font-semibold">{email || "user"}</span>
             </div>
 
             <form onSubmit={save} className="mt-5 space-y-4">
               <div>
-                <label className="text-xs text-white/60">Display Name</label>
+                <label className="text-xs text-muted">Display Name</label>
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                  className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
                   placeholder="e.g., Sai Sidharth"
                 />
-                <div className="mt-2 text-xs text-white/50">
+                <div className="mt-2 text-xs text-muted">
                   This will be used as the “player” name for bookings/matches.
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button className="rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 font-semibold">
+                <button className="rounded-2xl bg-surface2 hover:bg-line border border-line px-4 py-2 font-semibold">
                   Save
                 </button>
 
                 <button
                   type="button"
                   onClick={resetToDefault}
-                  className="rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2"
+                  className="rounded-2xl bg-surface2 hover:bg-surface2 border border-line px-4 py-2"
                 >
                   Reset
                 </button>

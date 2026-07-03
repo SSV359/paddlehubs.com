@@ -2,4 +2,180 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============ THEME PALETTES ============
+   Each palette = a real court surface. Default is "hardcourt".
+   Signature ball color (--signature) stays the same optic-yellow
+   across every palette — it's the brand constant, like the ball itself. */
+
+:root,
+[data-theme="hardcourt"] {
+  --bg: 244 247 245;
+  --surface: 255 255 255;
+  --surface-2: 227 235 231;
+  --text: 10 26 32;
+  --text-muted: 82 101 106;
+  --line: 199 212 205;
+  --accent: 21 94 158;
+  --accent-ink: 255 255 255;
+  --signature: 214 255 61;
+  --field-line: 21 94 158;
+  --field-opacity: 0.05;
+}
+[data-theme="hardcourt"].dark {
+  --bg: 8 20 25;
+  --surface: 16 38 45;
+  --surface-2: 22 50 58;
+  --text: 240 244 242;
+  --text-muted: 150 174 172;
+  --line: 52 84 90;
+  --accent: 214 255 61;
+  --accent-ink: 10 26 32;
+  --signature: 214 255 61;
+  --field-line: 214 255 61;
+  --field-opacity: 0.045;
+}
+
+[data-theme="clay"] {
+  --bg: 250 240 227;
+  --surface: 255 251 245;
+  --surface-2: 240 224 202;
+  --text: 41 24 14;
+  --text-muted: 122 89 66;
+  --line: 224 195 165;
+  --accent: 181 80 46;
+  --accent-ink: 255 255 255;
+  --signature: 233 179 26;
+  --field-line: 181 80 46;
+  --field-opacity: 0.06;
+}
+[data-theme="clay"].dark {
+  --bg: 26 16 11;
+  --surface: 41 26 18;
+  --surface-2: 54 35 24;
+  --text: 246 234 220;
+  --text-muted: 190 156 130;
+  --line: 79 53 37;
+  --accent: 224 129 79;
+  --accent-ink: 26 16 11;
+  --signature: 233 179 26;
+  --field-line: 224 129 79;
+  --field-opacity: 0.05;
+}
+
+[data-theme="grandslam"] {
+  --bg: 245 243 250;
+  --surface: 255 255 255;
+  --surface-2: 231 226 244;
+  --text: 21 15 34;
+  --text-muted: 91 80 122;
+  --line: 210 200 232;
+  --accent: 91 58 160;
+  --accent-ink: 255 255 255;
+  --signature: 228 255 77;
+  --field-line: 91 58 160;
+  --field-opacity: 0.055;
+}
+[data-theme="grandslam"].dark {
+  --bg: 15 11 24;
+  --surface: 27 20 42;
+  --surface-2: 36 27 55;
+  --text: 240 236 250;
+  --text-muted: 173 162 200;
+  --line: 60 48 86;
+  --accent: 176 148 255;
+  --accent-ink: 15 11 24;
+  --signature: 228 255 77;
+  --field-line: 176 148 255;
+  --field-opacity: 0.05;
+}
+
 html, body, #root { height: 100%; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background-color: rgb(var(--bg));
+  color: rgb(var(--text));
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+img { max-width: 100%; height: auto; }
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+/* Faint court-line field texture — sidelines/centerline at an angle,
+   grounding the whole app in the sport instead of a flat dashboard bg. */
+.court-field {
+  background-color: rgb(var(--bg));
+  background-image:
+    repeating-linear-gradient(
+      115deg,
+      rgb(var(--field-line) / var(--field-opacity)) 0px,
+      rgb(var(--field-line) / var(--field-opacity)) 1.5px,
+      transparent 1.5px,
+      transparent 140px
+    ),
+    repeating-linear-gradient(
+      25deg,
+      rgb(var(--field-line) / var(--field-opacity)) 0px,
+      rgb(var(--field-line) / var(--field-opacity)) 1.5px,
+      transparent 1.5px,
+      transparent 140px
+    );
+  background-attachment: fixed;
+  transition: background-color 200ms ease;
+}
+
+::selection { background: rgb(var(--signature) / 0.5); }
+
+:focus-visible {
+  outline: 2px solid rgb(var(--signature));
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Signature element: the "kitchen line" — pickleball's non-volley-zone line,
+   used site-wide as the section divider instead of a generic <hr>. */
+.kitchen-line {
+  position: relative;
+  height: 10px;
+  border-top: 2px solid rgb(var(--line));
+}
+.kitchen-line::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px dashed rgb(var(--signature) / 0.6);
+}
+
+.stat-score {
+  font-family: '"JetBrains Mono"', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.card-lift {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  border-color: rgb(var(--accent) / 0.4);
+  box-shadow: 0 12px 24px -12px rgb(0 0 0 / 0.25);
+}

@@ -166,9 +166,9 @@ export default function CourtBooking() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-white/5 to-cyan-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="text-2xl font-semibold">Court Booking</div>
-        <div className="text-sm text-white/70 mt-1">
+        <div className="text-sm text-muted mt-1">
           {loggedIn ? (
             <>
               Logged in as <span className="font-semibold">{displayName}</span> • Weekly usage:{" "}
@@ -181,25 +181,25 @@ export default function CourtBooking() {
       </div>
 
       {error && (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
       {info && (
-        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
           {info}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Form */}
-        <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur p-5">
+        <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="font-semibold">New booking</div>
             <button
               type="button"
               onClick={loadAll}
-              className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+              className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
               disabled={!loggedIn || loading}
               title="Refresh"
             >
@@ -209,7 +209,7 @@ export default function CourtBooking() {
 
           <form onSubmit={add} className="mt-4 space-y-3">
             <input
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+              className="w-full rounded-xl border border-line bg-surface2 px-3 py-2"
               name="name"
               value={form.name}
               onChange={onChange}
@@ -218,7 +218,7 @@ export default function CourtBooking() {
             />
 
             <select
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+              className="w-full rounded-xl border border-line bg-surface2 px-3 py-2"
               name="court"
               value={form.court}
               onChange={onChange}
@@ -233,7 +233,7 @@ export default function CourtBooking() {
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="date"
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2"
                 name="date"
                 value={form.date}
                 onChange={onChange}
@@ -241,7 +241,7 @@ export default function CourtBooking() {
               />
               <input
                 type="time"
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2"
                 name="time"
                 value={form.time}
                 onChange={onChange}
@@ -254,14 +254,14 @@ export default function CourtBooking() {
                 type="number"
                 min="15"
                 step="15"
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2"
                 name="duration"
                 value={form.duration}
                 onChange={onChange}
                 disabled={!loggedIn || loading}
               />
               <input
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2"
                 name="players"
                 value={form.players}
                 onChange={onChange}
@@ -271,14 +271,14 @@ export default function CourtBooking() {
             </div>
 
             <button
-              className="w-full rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 py-2.5 font-semibold disabled:opacity-40"
+              className="w-full rounded-2xl bg-surface2 hover:bg-line border border-line py-2.5 font-semibold disabled:opacity-40"
               disabled={!loggedIn || loading}
             >
               {loading ? "Saving..." : "Add Booking"}
             </button>
 
             {loggedIn && (
-              <div className="text-xs text-white/60">
+              <div className="text-xs text-muted">
                 Backend rule: <span className="font-semibold">2 bookings per week</span> per user.
               </div>
             )}
@@ -286,34 +286,34 @@ export default function CourtBooking() {
         </div>
 
         {/* List */}
-        <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur p-5">
+        <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="font-semibold">My Bookings</div>
-            <div className="text-xs text-white/60">{sorted.length}</div>
+            <div className="text-xs text-muted">{sorted.length}</div>
           </div>
 
           <div className="mt-4 space-y-3">
             {!loggedIn ? (
-              <div className="text-sm text-white/60">Login to view your bookings.</div>
+              <div className="text-sm text-muted">Login to view your bookings.</div>
             ) : sorted.length === 0 ? (
-              <div className="text-sm text-white/60">No bookings yet.</div>
+              <div className="text-sm text-muted">No bookings yet.</div>
             ) : (
               sorted.map((b) => (
-                <div key={b.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div key={b.id} className="rounded-xl border border-line bg-surface2 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="font-semibold">{b.court}</div>
-                      <div className="text-xs text-white/70">
+                      <div className="text-xs text-muted">
                         {b.date} • {b.time} • {b.duration} mins
                       </div>
-                      <div className="text-xs text-white/60">
+                      <div className="text-xs text-muted">
                         {b.ownerDisplayName || displayName || "—"} • {b.players || "—"}
                       </div>
                     </div>
 
                     <button
                       onClick={() => del(b.id)}
-                      className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+                      className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
                       disabled={loading}
                     >
                       Delete
@@ -325,7 +325,7 @@ export default function CourtBooking() {
           </div>
 
           {loggedIn && (
-            <div className="mt-4 text-xs text-white/60">
+            <div className="mt-4 text-xs text-muted">
               Weekly usage: <span className="font-semibold">{currentWeekCount}/2</span>
             </div>
           )}

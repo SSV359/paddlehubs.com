@@ -8,9 +8,15 @@ import {
   QueryCommand,
   DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
+import {
+  CognitoIdentityProviderClient,
+  ListUsersCommand,
+  ListUsersInGroupCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import crypto from "crypto";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const cognito = new CognitoIdentityProviderClient({});
 
 const PLAYERS_TABLE = process.env.PLAYERS_TABLE;
 const EVENTS_TABLE = process.env.EVENTS_TABLE;
@@ -18,11 +24,18 @@ const EVENTS_TABLE = process.env.EVENTS_TABLE;
 const CLUB_ID = process.env.CLUB_ID || "paddlehubs";
 const BOOKINGS_PER_WEEK = Number(process.env.BOOKINGS_PER_WEEK || "2");
 
-const WIN_POINTS = Number(process.env.WIN_POINTS || "2");
-const TIE_POINTS = Number(process.env.TIE_POINTS || "1");
-const LOSS_POINTS = Number(process.env.LOSS_POINTS || "0");
+// Team standings and player rankings use independent point formulas —
+// changing one can never accidentally affect the other.
+const TEAM_WIN_POINTS = Number(process.env.TEAM_WIN_POINTS ?? "1");
+const TEAM_TIE_POINTS = Number(process.env.TEAM_TIE_POINTS ?? "0.5");
+const TEAM_LOSS_POINTS = Number(process.env.TEAM_LOSS_POINTS ?? "0");
+
+const PLAYER_WIN_POINTS = Number(process.env.PLAYER_WIN_POINTS ?? "1");
+const PLAYER_TIE_POINTS = Number(process.env.PLAYER_TIE_POINTS ?? "0.5");
+const PLAYER_LOSS_POINTS = Number(process.env.PLAYER_LOSS_POINTS ?? "-0.5");
 
 const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || "https://paddlehubs.com";
+const USER_POOL_ID = process.env.USER_POOL_ID || "";
 
 // Optional: restrict courts via env var (comma-separated)
 const ALLOWED_COURTS = (process.env.ALLOWED_COURTS || "Court 1,Court 2,Court 3,Court 4")
@@ -62,9 +75,15 @@ function isAdminFromClaims(claims) {
   const g = claims?.["cognito:groups"];
   if (!g) return false;
   if (Array.isArray(g)) return g.includes("admins");
+
+  // API Gateway's HTTP API JWT authorizer flattens array claims into a
+  // string that looks like "[admins]" or "[admins, moderators]" —
+  // brackets and quotes included, not a clean comma list. Strip those
+  // before comparing, or a real admin will always fail this check.
   return String(g)
+    .replace(/^\[|\]$/g, "")
     .split(",")
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/^"|"$/g, ""))
     .includes("admins");
 }
 
@@ -565,8 +584,7 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
   const teamAId = trim(body.teamAId);
   const teamBId = trim(body.teamBId);
 
-  const scoreA = Number(body.scoreA ?? 0);
-  const scoreB = Number(body.scoreB ?? 0);
+  const gamesPlayed = Math.min(6, Math.max(1, Math.round(Number(body.gamesPlayed ?? 1)) || 1));
 
   const notes = trim(body.notes);
   const rawWinnerTeamId = body.winnerTeamId ? String(body.winnerTeamId) : "";
@@ -575,6 +593,35 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
   if (!validateCourt(court)) return { error: `Invalid court. Allowed: ${ALLOWED_COURTS.join(", ")}` };
   if (!teamAId || !teamBId) return { error: "teamAId and teamBId are required" };
   if (teamAId === teamBId) return { error: "teamAId and teamBId must be different" };
+  if (!Number.isInteger(gamesPlayed) || gamesPlayed < 1 || gamesPlayed > 6) {
+    return { error: "gamesPlayed must be a whole number between 1 and 6" };
+  }
+
+  // ---- Per-game scores. One {a,b} pair per game, exactly gamesPlayed of them. ----
+  const rawGames = Array.isArray(body.games) ? body.games : [];
+  if (rawGames.length !== gamesPlayed) {
+    return { error: `Expected ${gamesPlayed} game score${gamesPlayed > 1 ? "s" : ""}, got ${rawGames.length}.` };
+  }
+
+  const games = [];
+  for (let i = 0; i < rawGames.length; i++) {
+    const a = Number(rawGames[i]?.a);
+    const b = Number(rawGames[i]?.b);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0) {
+      return { error: `Game ${i + 1} needs a valid score for both teams.` };
+    }
+    games.push({ a, b });
+  }
+
+  // Totals across all games (used for points-for/points-against in standings).
+  const scoreA = games.reduce((sum, g) => sum + g.a, 0);
+  const scoreB = games.reduce((sum, g) => sum + g.b, 0);
+
+  // Games won per side — this is what decides the match winner, not raw
+  // point totals, since a match can be won 2-1 on games despite fewer
+  // total points across all games.
+  const gamesWonA = games.filter((g) => g.a > g.b).length;
+  const gamesWonB = games.filter((g) => g.b > g.a).length;
 
   const rec = await getTournamentRecord(tournamentId);
   if (!rec) return { error: "Tournament not found" };
@@ -587,12 +634,31 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
   const teamB = byId.get(teamBId);
   if (!teamA || !teamB) return { error: "Teams not saved or invalid team ids. Save teams first." };
 
+  // ---- Per-player names for this specific match (roster is the pool; the
+  // players who actually played can be a subset picked at match time) ----
+  const requiredPerSide = gameType === "singles" ? 1 : 2;
+
+  const teamAPlayers = (Array.isArray(body.teamAPlayers) ? body.teamAPlayers : [])
+    .map((p) => trim(p))
+    .filter(Boolean);
+  const teamBPlayers = (Array.isArray(body.teamBPlayers) ? body.teamBPlayers : [])
+    .map((p) => trim(p))
+    .filter(Boolean);
+
+  if (teamAPlayers.length !== requiredPerSide || teamBPlayers.length !== requiredPerSide) {
+    return {
+      error: `${gameType === "singles" ? "Singles" : "Doubles"} matches need exactly ${requiredPerSide} player${
+        requiredPerSide > 1 ? "s" : ""
+      } per team.`,
+    };
+  }
+
   const winnerTeamId = computeWinnerTeamId({
     teamAId,
     teamBId,
     winnerTeamId: rawWinnerTeamId,
-    scoreA,
-    scoreB,
+    scoreA: gamesWonA,
+    scoreB: gamesWonB,
   });
 
   const matchup = `${teamA.name} vs ${teamB.name}`;
@@ -620,10 +686,16 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
 
     teamAId,
     teamBId,
+    teamAPlayers,
+    teamBPlayers,
     winnerTeamId,
     matchup,
     winner,
 
+    games,
+    gamesPlayed,
+    gamesWonA,
+    gamesWonB,
     scoreA,
     scoreB,
     notes,
@@ -718,35 +790,35 @@ async function computeStandings(tournamentId) {
     if (winId === "TIE" || sA === sB) {
       a.ties += 1;
       b.ties += 1;
-      a.points += TIE_POINTS;
-      b.points += TIE_POINTS;
+      a.points += TEAM_TIE_POINTS;
+      b.points += TEAM_TIE_POINTS;
     } else if (winId === aId) {
       a.wins += 1;
       b.losses += 1;
-      a.points += WIN_POINTS;
-      b.points += LOSS_POINTS;
+      a.points += TEAM_WIN_POINTS;
+      b.points += TEAM_LOSS_POINTS;
     } else if (winId === bId) {
       b.wins += 1;
       a.losses += 1;
-      b.points += WIN_POINTS;
-      a.points += LOSS_POINTS;
+      b.points += TEAM_WIN_POINTS;
+      a.points += TEAM_LOSS_POINTS;
     } else {
       // fallback infer
       if (sA === sB) {
         a.ties += 1;
         b.ties += 1;
-        a.points += TIE_POINTS;
-        b.points += TIE_POINTS;
+        a.points += TEAM_TIE_POINTS;
+        b.points += TEAM_TIE_POINTS;
       } else if (sA > sB) {
         a.wins += 1;
         b.losses += 1;
-        a.points += WIN_POINTS;
-        b.points += LOSS_POINTS;
+        a.points += TEAM_WIN_POINTS;
+        b.points += TEAM_LOSS_POINTS;
       } else {
         b.wins += 1;
         a.losses += 1;
-        b.points += WIN_POINTS;
-        a.points += LOSS_POINTS;
+        b.points += TEAM_WIN_POINTS;
+        a.points += TEAM_LOSS_POINTS;
       }
     }
   }
@@ -767,6 +839,184 @@ async function computeStandings(tournamentId) {
 
   const standings = list.map((r, i) => ({ ...r, rank: i + 1 }));
   return { tournamentId, standings };
+}
+
+// ---------- PLAYER RANKINGS ----------
+// Purely computed from TMATCH.teamAPlayers/teamBPlayers, which only exist on
+// matches created going forward. Older matches (no per-player names saved)
+// are skipped automatically — this never reads or writes PLAYERS_TABLE, so
+// existing profile/backfill data is completely untouched.
+function normalizePlayerKey(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+async function computePlayerStandings({ tournamentId } = {}) {
+  let matches = [];
+
+  if (tournamentId) {
+    const mRes = await listTournamentMatches(tournamentId, 500);
+    matches = mRes.items || [];
+  } else {
+    const tRes = await listTournaments(500);
+    const tournaments = tRes.items || [];
+    const lists = await Promise.all(
+      tournaments.map((t) => listTournamentMatches(String(t.id), 500).then((r) => r.items || []))
+    );
+    matches = lists.flat();
+  }
+
+  const base = new Map();
+
+  function ensurePlayer(name) {
+    const key = normalizePlayerKey(name);
+    if (!key) return null;
+    if (!base.has(key)) {
+      base.set(key, {
+        player: String(name).trim(),
+        points: 0,
+        wins: 0,
+        losses: 0,
+        ties: 0,
+        played: 0,
+      });
+    }
+    return base.get(key);
+  }
+
+  for (const m of matches) {
+    const aPlayers = Array.isArray(m.teamAPlayers) ? m.teamAPlayers : [];
+    const bPlayers = Array.isArray(m.teamBPlayers) ? m.teamBPlayers : [];
+    if (!aPlayers.length || !bPlayers.length) continue; // older match without per-player data — skip
+
+    const winId = String(m.winnerTeamId || "");
+    const sA = Number(m.scoreA ?? 0);
+    const sB = Number(m.scoreB ?? 0);
+
+    let aResult, bResult;
+    if (winId === "TIE" || (!winId && sA === sB)) {
+      aResult = bResult = "tie";
+    } else if (winId ? winId === String(m.teamAId) : sA > sB) {
+      aResult = "win";
+      bResult = "loss";
+    } else {
+      aResult = "loss";
+      bResult = "win";
+    }
+
+    for (const name of aPlayers) {
+      const p = ensurePlayer(name);
+      if (!p) continue;
+      p.played += 1;
+      if (aResult === "win") { p.wins += 1; p.points += PLAYER_WIN_POINTS; }
+      else if (aResult === "loss") { p.losses += 1; p.points += PLAYER_LOSS_POINTS; }
+      else { p.ties += 1; p.points += PLAYER_TIE_POINTS; }
+    }
+
+    for (const name of bPlayers) {
+      const p = ensurePlayer(name);
+      if (!p) continue;
+      p.played += 1;
+      if (bResult === "win") { p.wins += 1; p.points += PLAYER_WIN_POINTS; }
+      else if (bResult === "loss") { p.losses += 1; p.points += PLAYER_LOSS_POINTS; }
+      else { p.ties += 1; p.points += PLAYER_TIE_POINTS; }
+    }
+  }
+
+  const list = Array.from(base.values());
+
+  list.sort((x, y) => {
+    if (y.points !== x.points) return y.points - x.points;
+    if (y.wins !== x.wins) return y.wins - x.wins;
+    if (y.played !== x.played) return x.played - y.played; // fewer games, same points -> better rate
+    return x.player.localeCompare(y.player);
+  });
+
+  // Dense ranking: players tied on points share the same rank, and the
+  // next distinct point value is simply the next rank number — no gaps
+  // (e.g. 1, 1, 2, 2 — not 1, 1, 3, 3).
+  let rank = 0;
+  let lastPoints = null;
+  const standings = list.map((r) => {
+    if (lastPoints === null || r.points !== lastPoints) {
+      rank += 1;
+      lastPoints = r.points;
+    }
+    return { ...r, rank };
+  });
+
+  return { standings };
+}
+
+// ---------- ADMIN: registered users (Cognito) ----------
+function cognitoAttr(user, name) {
+  const found = (user.Attributes || []).find((a) => a.Name === name);
+  return found ? found.Value : "";
+}
+
+async function listAllCognitoUsers() {
+  if (!USER_POOL_ID) throw new Error("Missing env var USER_POOL_ID");
+
+  let users = [];
+  let token;
+  do {
+    const res = await cognito.send(
+      new ListUsersCommand({
+        UserPoolId: USER_POOL_ID,
+        PaginationToken: token,
+        Limit: 60,
+      })
+    );
+    users = users.concat(res.Users || []);
+    token = res.PaginationToken;
+  } while (token);
+
+  return users;
+}
+
+async function listAdminUsernames() {
+  if (!USER_POOL_ID) return new Set();
+
+  let usernames = [];
+  let token;
+  try {
+    do {
+      const res = await cognito.send(
+        new ListUsersInGroupCommand({
+          UserPoolId: USER_POOL_ID,
+          GroupName: "admins",
+          NextToken: token,
+          Limit: 60,
+        })
+      );
+      usernames = usernames.concat((res.Users || []).map((u) => u.Username));
+      token = res.NextToken;
+    } while (token);
+  } catch {
+    // If the "admins" group doesn't exist yet, just treat nobody as admin here.
+    return new Set();
+  }
+
+  return new Set(usernames);
+}
+
+async function getRegisteredUsers() {
+  const [rawUsers, adminUsernames] = await Promise.all([listAllCognitoUsers(), listAdminUsernames()]);
+
+  const users = rawUsers.map((u) => ({
+    username: u.Username,
+    sub: cognitoAttr(u, "sub"),
+    email: cognitoAttr(u, "email"),
+    emailVerified: cognitoAttr(u, "email_verified") === "true",
+    status: u.UserStatus || "",
+    enabled: u.Enabled !== false,
+    createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : "",
+    lastModifiedAt: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : "",
+    isAdmin: adminUsernames.has(u.Username),
+  }));
+
+  users.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+  return { count: users.length, users };
 }
 
 // ---------- Router ----------
@@ -862,6 +1112,13 @@ export async function handler(event) {
       return json(200, r);
     }
 
+    // Admin: registered user list (Cognito)
+    if (routeKey === "GET /admin/users") {
+      if (!admin) return json(403, { error: "Admin only" });
+      const r = await getRegisteredUsers();
+      return json(200, r);
+    }
+
     // Tournaments
     if (routeKey === "GET /tournaments") return json(200, await listTournaments());
 
@@ -934,6 +1191,20 @@ export async function handler(event) {
       const r = await computeStandings(id);
       if (r?.error) return json(r.statusCode || 400, { error: r.error });
 
+      return json(200, r);
+    }
+
+    // Player rankings (club-wide, aggregated across all tournaments)
+    if (routeKey === "GET /player-rankings") {
+      const r = await computePlayerStandings();
+      return json(200, r);
+    }
+
+    // Player rankings scoped to one tournament
+    if (routeKey === "GET /tournaments/{id}/player-rankings") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+      const r = await computePlayerStandings({ tournamentId: id });
       return json(200, r);
     }
 

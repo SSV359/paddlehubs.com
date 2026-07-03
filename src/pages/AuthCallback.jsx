@@ -33,14 +33,14 @@ export default function AuthCallback() {
 
   return (
     <div className="mx-auto max-w-xl p-6">
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white">
+      <div className="rounded-2xl border border-line bg-surface p-6 text-ink">
         <div className="text-xl font-semibold">Signing you in…</div>
-        <div className="text-sm text-white/70 mt-2">
+        <div className="text-sm text-muted mt-2">
           Please wait while we finish login.
         </div>
 
         {err ? (
-          <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
             {err}
           </div>
         ) : null}

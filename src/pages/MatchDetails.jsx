@@ -289,9 +289,9 @@ export default function MatchDetails() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-fuchsia-500/15 via-white/5 to-amber-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="text-2xl font-semibold">Match Details</div>
-        <div className="text-sm text-white/70 mt-1">
+        <div className="text-sm text-muted mt-1">
           {loggedIn ? (
             <>
               Logged in as <span className="font-semibold">{displayName || email || "user"}</span> • Matches saved in the shared club database
@@ -303,25 +303,25 @@ export default function MatchDetails() {
       </div>
 
       {error && (
-        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
       {info && (
-        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
           {info}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Form */}
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div className="text-lg font-semibold">New Match</div>
             <button
               type="button"
               onClick={loadAll}
-              className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+              className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
               disabled={!loggedIn || loading}
             >
               Refresh
@@ -336,7 +336,7 @@ export default function MatchDetails() {
                 value={form.date}
                 onChange={onChange}
                 disabled={!loggedIn || loading}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
               />
 
               <select
@@ -344,7 +344,7 @@ export default function MatchDetails() {
                 value={form.court}
                 onChange={onChange}
                 disabled={!loggedIn || loading}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
               >
                 <option>Court 1</option>
                 <option>Court 2</option>
@@ -357,7 +357,7 @@ export default function MatchDetails() {
                 value={form.gameType}
                 onChange={onChange}
                 disabled={!loggedIn || loading}
-                className="sm:col-span-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                className="sm:col-span-2 rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
               >
                 <option value="singles">Singles</option>
                 <option value="doubles">Doubles</option>
@@ -372,7 +372,7 @@ export default function MatchDetails() {
                   onChange={onChange}
                   placeholder="Player 1 (you)"
                   disabled={!loggedIn || loading}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
                 />
                 <input
                   name="singlesP2"
@@ -380,7 +380,7 @@ export default function MatchDetails() {
                   onChange={onChange}
                   placeholder="Player 2"
                   disabled={!loggedIn || loading}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
                 />
               </div>
             ) : (
@@ -391,7 +391,7 @@ export default function MatchDetails() {
                   onChange={onChange}
                   placeholder="Team 1 - Player 1 (you)"
                   disabled={!loggedIn || loading}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
                 />
                 <input
                   name="doublesT1P2"
@@ -399,7 +399,7 @@ export default function MatchDetails() {
                   onChange={onChange}
                   placeholder="Team 1 - Player 2"
                   disabled={!loggedIn || loading}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
                 />
                 <input
                   name="doublesT2P1"
@@ -407,7 +407,7 @@ export default function MatchDetails() {
                   onChange={onChange}
                   placeholder="Team 2 - Player 1"
                   disabled={!loggedIn || loading}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
                 />
                 <input
                   name="doublesT2P2"
@@ -415,12 +415,12 @@ export default function MatchDetails() {
                   onChange={onChange}
                   placeholder="Team 2 - Player 2"
                   disabled={!loggedIn || loading}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                  className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
                 />
               </div>
             )}
 
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm font-semibold">
+            <div className="rounded-xl border border-line bg-surface2 p-3 text-sm font-semibold">
               {preview}
             </div>
 
@@ -431,7 +431,7 @@ export default function MatchDetails() {
                 value={form.scoreA}
                 onChange={onChange}
                 disabled={!loggedIn || loading}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
               />
               <input
                 type="number"
@@ -439,7 +439,7 @@ export default function MatchDetails() {
                 value={form.scoreB}
                 onChange={onChange}
                 disabled={!loggedIn || loading}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
               />
             </div>
 
@@ -450,11 +450,11 @@ export default function MatchDetails() {
               rows="3"
               placeholder="Notes (optional)"
               disabled={!loggedIn || loading}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 disabled:opacity-40"
+              className="w-full rounded-xl border border-line bg-surface2 px-3 py-2 disabled:opacity-40"
             />
 
             <button
-              className="w-full rounded-2xl bg-white/10 hover:bg-white/20 py-2 font-semibold disabled:opacity-40"
+              className="w-full rounded-2xl bg-surface2 hover:bg-line py-2 font-semibold disabled:opacity-40"
               disabled={!loggedIn || loading || !form.date || !isValid(form)}
             >
               {loading ? "Saving..." : "Add Match"}
@@ -463,21 +463,21 @@ export default function MatchDetails() {
         </div>
 
         {/* History */}
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+        <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div className="text-lg font-semibold">Match History</div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={exportCSV}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={sorted.length === 0}
               >
                 Export CSV
               </button>
               <button
                 onClick={exportPDF}
-                className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-3 py-2 text-xs disabled:opacity-40"
+                className="rounded-xl border border-line bg-surface2 hover:bg-surface2 px-3 py-2 text-xs disabled:opacity-40"
                 disabled={sorted.length === 0}
               >
                 Export PDF
@@ -485,27 +485,27 @@ export default function MatchDetails() {
             </div>
           </div>
 
-          <div className="mt-3 text-xs text-white/60">{sorted.length} total</div>
+          <div className="mt-3 text-xs text-muted">{sorted.length} total</div>
 
           <div className="mt-4">
             {!loggedIn ? (
-              <div className="text-sm text-white/60">Login to view your matches.</div>
+              <div className="text-sm text-muted">Login to view your matches.</div>
             ) : sorted.length === 0 ? (
-              <div className="text-sm text-white/60">No matches yet</div>
+              <div className="text-sm text-muted">No matches yet</div>
             ) : (
               sorted.map((m) => (
-                <div key={m.id} className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div key={m.id} className="mb-3 rounded-xl border border-line bg-surface2 p-4">
                   <div className="font-semibold">{m.matchup}</div>
-                  <div className="text-xs text-white/60">
+                  <div className="text-xs text-muted">
                     {m.date} • {m.court} • {m.gameType}
                   </div>
-                  <div className="text-xs text-white/60">
+                  <div className="text-xs text-muted">
                     Score: {m.scoreA} - {m.scoreB} • Winner: {m.winner}
                   </div>
-                  {m.notes ? <div className="text-xs text-white/60 mt-1">Notes: {m.notes}</div> : null}
+                  {m.notes ? <div className="text-xs text-muted mt-1">Notes: {m.notes}</div> : null}
                   <button
                     onClick={() => remove(m.id)}
-                    className="mt-2 text-xs underline text-white/70 disabled:opacity-40"
+                    className="mt-2 text-xs underline text-muted disabled:opacity-40"
                     disabled={loading}
                   >
                     Delete

@@ -7,11 +7,20 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "vite build && npx cap sync",
+    "cap:ios": "vite build && npx cap sync ios && npx cap open ios",
+    "cap:android": "vite build && npx cap sync android && npx cap open android"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.966.0",
     "@aws-sdk/client-dynamodb": "^3.966.0",
     "@aws-sdk/lib-dynamodb": "^3.966.0",
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/browser": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
     "jspdf": "^4.0.0",
     "jspdf-autotable": "^5.0.2",
     "jwt-decode": "^4.0.0",
@@ -23,6 +32,7 @@
     "react-router-dom": "^7.11.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
     "@eslint/js": "^9.39.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

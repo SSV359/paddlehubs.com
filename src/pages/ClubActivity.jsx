@@ -10,7 +10,7 @@ function classNames(...xs) {
 
 function Pill({ children }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/70">
+    <span className="inline-flex items-center rounded-full border border-line bg-surface2 px-2.5 py-1 text-[11px] text-muted">
       {children}
     </span>
   );
@@ -131,11 +131,11 @@ export default function ClubActivity() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-amber-500/15 via-white/5 to-fuchsia-500/15 p-6">
+      <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-2xl font-semibold">Club Activity</div>
-            <div className="text-sm text-white/70 mt-1">
+            <div className="text-sm text-muted mt-1">
               Club-wide bookings + matches (shared database)
             </div>
 
@@ -152,7 +152,7 @@ export default function ClubActivity() {
             disabled={!loggedIn || loading}
             className={classNames(
               "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm",
-              "border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40"
+              "border-line bg-surface2 hover:bg-surface2 disabled:opacity-40"
             )}
             title="Refresh"
           >
@@ -163,22 +163,22 @@ export default function ClubActivity() {
       </div>
 
       {!loggedIn ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white/70">
+        <div className="rounded-2xl border border-line bg-surface p-6 text-muted">
           Please login to view club activity.
         </div>
       ) : (
         <>
           {err ? (
-            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {err}
             </div>
           ) : null}
 
           {/* Controls */}
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center gap-3">
               {/* Tabs */}
-              <div className="inline-flex rounded-2xl border border-white/10 bg-white/5 p-1">
+              <div className="inline-flex rounded-xl border border-line bg-surface2 p-1">
                 {[
                   { k: "all", label: "All" },
                   { k: "bookings", label: "Bookings" },
@@ -189,7 +189,7 @@ export default function ClubActivity() {
                     onClick={() => setTab(t.k)}
                     className={classNames(
                       "rounded-xl px-3 py-2 text-sm",
-                      tab === t.k ? "bg-white/15" : "hover:bg-white/10 text-white/80"
+                      tab === t.k ? "bg-surface2" : "hover:bg-surface2 text-ink/80"
                     )}
                   >
                     {t.label}
@@ -199,7 +199,7 @@ export default function ClubActivity() {
 
               {/* Court filter */}
               <select
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm"
+                className="rounded-xl border border-line bg-surface2 px-3 py-2 text-sm"
                 value={court}
                 onChange={(e) => setCourt(e.target.value)}
               >
@@ -211,8 +211,8 @@ export default function ClubActivity() {
               </select>
 
               {/* Search */}
-              <div className="ml-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 w-full md:w-[420px]">
-                <Search size={16} className="text-white/60" />
+              <div className="ml-auto flex items-center gap-2 rounded-xl border border-line bg-surface2 px-3 py-2 w-full md:w-[420px]">
+                <Search size={16} className="text-muted" />
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
@@ -222,7 +222,7 @@ export default function ClubActivity() {
               </div>
             </div>
 
-            <div className="mt-3 text-xs text-white/60">
+            <div className="mt-3 text-xs text-muted">
               Showing <span className="font-semibold">{filtered.length}</span> item(s)
             </div>
           </div>
@@ -230,23 +230,23 @@ export default function ClubActivity() {
           {/* Feed */}
           <div className="space-y-3">
             {loading ? (
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white/70">
+              <div className="rounded-2xl border border-line bg-surface p-6 text-muted">
                 Loading…
               </div>
             ) : filtered.length === 0 ? (
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-white/70">
+              <div className="rounded-2xl border border-line bg-surface p-6 text-muted">
                 No activity found.
               </div>
             ) : (
               filtered.map((x) => (
                 <div
                   key={x.sk || x.id}
-                  className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur p-5"
+                  className="rounded-2xl border border-line bg-surface p-5 shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-2">
+                        <div className="rounded-xl border border-line bg-surface2 p-2">
                           {x._kind === "BOOKING" ? <CalendarDays size={16} /> : <Trophy size={16} />}
                         </div>
                         <div className="font-semibold">
@@ -257,46 +257,46 @@ export default function ClubActivity() {
                       </div>
 
                       {x._kind === "BOOKING" ? (
-                        <div className="mt-2 text-sm text-white/90">
+                        <div className="mt-2 text-sm text-ink">
                           {safeStr(x.date)} • {safeStr(x.time)} • {safeStr(x.duration)} mins
                         </div>
                       ) : (
-                        <div className="mt-2 text-sm text-white/90 truncate">
+                        <div className="mt-2 text-sm text-ink truncate">
                           {safeStr(x.matchup) || "—"}
                         </div>
                       )}
 
-                      <div className="mt-1 text-xs text-white/60">
+                      <div className="mt-1 text-xs text-muted">
                         By:{" "}
-                        <span className="text-white/80">
+                        <span className="text-ink/80">
                           {safeStr(x.ownerDisplayName) || safeStr(x.ownerEmail) || "—"}
                         </span>
                         {x._kind === "BOOKING" && safeStr(x.players) ? (
                           <>
                             {" "}
-                            • Players: <span className="text-white/80">{safeStr(x.players)}</span>
+                            • Players: <span className="text-ink/80">{safeStr(x.players)}</span>
                           </>
                         ) : null}
                         {x._kind === "MATCH" ? (
                           <>
                             {" "}
                             • Score:{" "}
-                            <span className="text-white/80">
+                            <span className="text-ink/80">
                               {x.scoreA ?? "—"}-{x.scoreB ?? "—"}
                             </span>{" "}
-                            • Winner: <span className="text-white/80">{safeStr(x.winner) || "—"}</span>
+                            • Winner: <span className="text-ink/80">{safeStr(x.winner) || "—"}</span>
                           </>
                         ) : null}
                       </div>
 
                       {x._kind === "MATCH" && safeStr(x.notes) ? (
-                        <div className="mt-2 text-xs text-white/60">
-                          Notes: <span className="text-white/80">{safeStr(x.notes)}</span>
+                        <div className="mt-2 text-xs text-muted">
+                          Notes: <span className="text-ink/80">{safeStr(x.notes)}</span>
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="text-[11px] text-white/50 whitespace-nowrap">
+                    <div className="text-[11px] text-muted whitespace-nowrap">
                       {fmtWhen(x)}
                     </div>
                   </div>

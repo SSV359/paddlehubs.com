@@ -154,11 +154,17 @@ export default function TournamentDetails() {
   const [showQr, setShowQr] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [regWindow, setRegWindow] = useState({ registrationStartDate: "", registrationEndDate: "" });
+  const [playerPool, setPlayerPool] = useState([]);
+  const [newPoolPlayer, setNewPoolPlayer] = useState("");
+  const [savingPool, setSavingPool] = useState(false);
   const [savingRegWindow, setSavingRegWindow] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState({}); // { [week]: bool }
 
   // Matches table: text filter + sort direction
   const [matchQuery, setMatchQuery] = useState("");
+  const [editingMatchId, setEditingMatchId] = useState("");
+  const [editForm, setEditForm] = useState({ teamAPlayers: [], teamBPlayers: [], gamesPlayed: 1, games: [] });
+  const [savingEdit, setSavingEdit] = useState(false);
   const [matchSortAsc, setMatchSortAsc] = useState(false);
 
   const [setup, setSetup] = useState({
@@ -215,6 +221,7 @@ export default function TournamentDetails() {
         registrationStartDate: tRes?.registrationStartDate || "",
         registrationEndDate: tRes?.registrationEndDate || "",
       });
+      setPlayerPool(Array.isArray(tRes?.playerPool) ? tRes.playerPool : []);
 
       const mRes = await api.listTournamentMatches(id);
       setMatches(mRes?.items || []);
@@ -224,7 +231,15 @@ export default function TournamentDetails() {
 
       try {
         const schedRes = await api.getTournamentSchedule(id);
-        const weeks = Array.isArray(schedRes?.weeks) ? schedRes.weeks : [];
+        const rawWeeks = Array.isArray(schedRes?.weeks) ? schedRes.weeks : [];
+        const matchesById = new Map((mRes?.items || []).map((m) => [String(m.id), m]));
+        const weeks = rawWeeks.map((w) => ({
+          ...w,
+          fixtures: (w.fixtures || []).map((f) => ({
+            ...f,
+            games: f.matchId && matchesById.has(String(f.matchId)) ? matchesById.get(String(f.matchId)).games : f.games,
+          })),
+        }));
         setSchedule(weeks);
 
         // Default the start date to the tournament's own start date, but
@@ -337,6 +352,37 @@ export default function TournamentDetails() {
     });
   }
 
+  function addPoolPlayer() {
+    const name = trim(newPoolPlayer);
+    if (!name) return;
+    if (playerPool.some((p) => p.toLowerCase() === name.toLowerCase())) {
+      setNewPoolPlayer("");
+      return setErr(`${name} is already in the player pool.`);
+    }
+    setPlayerPool((prev) => [...prev, name].sort((a, b) => a.localeCompare(b)));
+    setNewPoolPlayer("");
+  }
+
+  function removePoolPlayer(name) {
+    setPlayerPool((prev) => prev.filter((p) => p !== name));
+  }
+
+  async function savePlayerPool() {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can manage the player pool.");
+    setErr("");
+    setMsg("");
+    setSavingPool(true);
+    try {
+      const res = await api.updatePlayerPool(id, playerPool);
+      setPlayerPool(Array.isArray(res?.playerPool) ? res.playerPool : playerPool);
+      setMsg("Player pool saved ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSavingPool(false);
+    }
+  }
+
   async function saveTeams() {
     setErr("");
     setMsg("");
@@ -361,6 +407,7 @@ export default function TournamentDetails() {
     try {
       const updated = await api.updateTournamentTeams(id, payload);
       setTournament(updated || null);
+      setPlayerPool(Array.isArray(updated?.playerPool) ? updated.playerPool : []);
 
       const sRes = await api.getTournamentStandings(id);
       setStandings(sRes?.standings || []);
@@ -547,6 +594,153 @@ export default function TournamentDetails() {
     });
   }
 
+  // Handles the "+ Add new player…" option in a fixture's player select —
+  // prompts for a name, adds it to the pool, and picks it for that slot.
+  function handleFixturePlayerSelect(weekIdx, fxIdx, side, playerIdx, value) {
+    if (value !== "__add_new__") {
+      setFixturePlayer(weekIdx, fxIdx, side, playerIdx, value);
+      return;
+    }
+    const name = trim(window.prompt("New player's name:") || "");
+    if (!name) return;
+    if (!playerPool.some((p) => p.toLowerCase() === name.toLowerCase())) {
+      setPlayerPool((prev) => [...prev, name].sort((a, b) => a.localeCompare(b)));
+    }
+    setFixturePlayer(weekIdx, fxIdx, side, playerIdx, name);
+  }
+
+  function setFixtureGameScore(weekIdx, fxIdx, gameIdx, side, value) {
+    setSchedule((prev) => {
+      const next = prev.map((w) => ({ ...w, fixtures: w.fixtures.map((f) => ({ ...f })) }));
+      const fx = next[weekIdx].fixtures[fxIdx];
+      const games = resizeGames(fx.games, fx.gamesPlayed).slice();
+      games[gameIdx] = { ...games[gameIdx], [side]: value };
+      fx.games = games;
+      return next;
+    });
+  }
+
+  // Records (or updates, if already recorded) the real match for one
+  // fixture — reuses the exact same validated backend as Add Match, so
+  // player requirements and games-won winner logic all still apply.
+  async function recordFixtureMatch(weekIdx, fxIdx) {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can record scores.");
+
+    const week = schedule[weekIdx];
+    const fx = week.fixtures[fxIdx];
+
+    const rawGames = resizeGames(fx.games, fx.gamesPlayed);
+    if (rawGames.some((g) => trim(g.a) === "" || trim(g.b) === "")) {
+      return setErr(`Enter a score for both teams in all ${fx.gamesPlayed} game${fx.gamesPlayed > 1 ? "s" : ""}.`);
+    }
+    const games = rawGames.map((g) => ({ a: Number(g.a), b: Number(g.b) }));
+    if (games.some((g) => !Number.isFinite(g.a) || !Number.isFinite(g.b) || g.a < 0 || g.b < 0)) {
+      return setErr(`Enter a score for both teams in all ${fx.gamesPlayed} game${fx.gamesPlayed > 1 ? "s" : ""}.`);
+    }
+    if (!fx.teamAPlayers?.length || !fx.teamBPlayers?.length) {
+      return setErr("Pick players for both teams on this fixture before recording a score.");
+    }
+
+    const payload = {
+      date: week.date,
+      court: fx.court,
+      gameType: fx.gameType,
+      teamAId: fx.teamAId,
+      teamBId: fx.teamBId,
+      teamAPlayers: fx.teamAPlayers,
+      teamBPlayers: fx.teamBPlayers,
+      gamesPlayed: fx.gamesPlayed,
+      games,
+    };
+
+    setErr("");
+    setMsg("");
+    setLoading(true);
+    try {
+      const result = fx.matchId
+        ? await api.updateTournamentMatch(id, fx.matchId, payload)
+        : await api.createTournamentMatch(id, payload);
+
+      // Capture the freshly-updated schedule as it's computed, rather
+      // than reading the `schedule` closure variable below — that
+      // closure is a snapshot from whenever this function was called,
+      // and would be stale if another fixture's score was just
+      // recorded moments earlier in the same session.
+      let freshSchedule = schedule;
+      setSchedule((prev) => {
+        const next = prev.map((w) => ({ ...w, fixtures: w.fixtures.map((f) => ({ ...f })) }));
+        next[weekIdx].fixtures[fxIdx].matchId = result.id;
+        next[weekIdx].fixtures[fxIdx].games = games;
+        freshSchedule = next;
+        return next;
+      });
+
+      const mRes = await api.listTournamentMatches(id);
+      setMatches(mRes?.items || []);
+      const sRes = await api.getTournamentStandings(id);
+      setStandings(sRes?.standings || []);
+
+      // Persist the matchId onto the saved schedule too, so it's still
+      // linked after a reload.
+      await api.saveTournamentSchedule(id, {
+        weeks: freshSchedule.map((w) => ({
+          week: w.week,
+          date: w.date,
+          skipped: !!w.skipped,
+          fixtures: (w.fixtures || []).map((f) => ({
+            teamAId: f.teamAId,
+            teamBId: f.teamBId,
+            court: f.court,
+            gameType: f.gameType,
+            gamesPlayed: f.gamesPlayed,
+            teamAPlayers: (f.teamAPlayers || []).map((p) => trim(p)).filter(Boolean),
+            teamBPlayers: (f.teamBPlayers || []).map((p) => trim(p)).filter(Boolean),
+            matchId: f.matchId || "",
+          })),
+        })),
+      });
+
+      setMsg(fx.matchId ? "Score updated ✅" : "Score recorded ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteFixtureMatch(weekIdx, fxIdx) {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can delete a recorded score.");
+    const fx = schedule[weekIdx].fixtures[fxIdx];
+    if (!fx.matchId) return;
+
+    const ok = confirm("Delete this recorded match? The score will be removed from Matches too.");
+    if (!ok) return;
+
+    setErr("");
+    setMsg("");
+    setLoading(true);
+    try {
+      await api.deleteTournamentMatch(id, fx.matchId);
+
+      setSchedule((prev) => {
+        const next = prev.map((w) => ({ ...w, fixtures: w.fixtures.map((f) => ({ ...f })) }));
+        next[weekIdx].fixtures[fxIdx].matchId = "";
+        return next;
+      });
+
+      const mRes = await api.listTournamentMatches(id);
+      setMatches(mRes?.items || []);
+      const sRes = await api.getTournamentStandings(id);
+      setStandings(sRes?.standings || []);
+
+      setMsg("Recorded score deleted ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function saveSchedule() {
     if (!canEditTournament) return setErr("Only tournament owner/admin can save the schedule.");
     if (!schedule.length) return setErr("Generate a schedule first.");
@@ -568,11 +762,27 @@ export default function TournamentDetails() {
             gamesPlayed: f.gamesPlayed,
             teamAPlayers: (f.teamAPlayers || []).map((p) => trim(p)).filter(Boolean),
             teamBPlayers: (f.teamBPlayers || []).map((p) => trim(p)).filter(Boolean),
+            matchId: f.matchId || "",
           })),
         })),
       };
       const res = await api.saveTournamentSchedule(id, payload);
       setSchedule(Array.isArray(res?.weeks) ? res.weeks : schedule);
+
+      // Backend also merges these into the saved pool — mirror that
+      // locally so the dropdowns/datalist reflect it immediately.
+      const usedNames = payload.weeks.flatMap((w) => w.fixtures.flatMap((f) => [...f.teamAPlayers, ...f.teamBPlayers]));
+      if (usedNames.length) {
+        setPlayerPool((prev) => {
+          const seen = new Map(prev.map((n) => [n.toLowerCase(), n]));
+          for (const n of usedNames) {
+            const key = n.toLowerCase();
+            if (!seen.has(key)) seen.set(key, n);
+          }
+          return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+        });
+      }
+
       setMsg("Schedule saved ✅");
     } catch (e) {
       setErr(String(e?.message || e));
@@ -673,10 +883,11 @@ export default function TournamentDetails() {
       return setErr("Games played must be between 1 and 6.");
     }
 
-    const games = resizeGames(form.games, gamesPlayed).map((g) => ({
-      a: Number(g.a),
-      b: Number(g.b),
-    }));
+    const rawFormGames = resizeGames(form.games, gamesPlayed);
+    if (rawFormGames.some((g) => trim(g.a) === "" || trim(g.b) === "")) {
+      return setErr(`Enter a score for both teams in all ${gamesPlayed} game${gamesPlayed > 1 ? "s" : ""}.`);
+    }
+    const games = rawFormGames.map((g) => ({ a: Number(g.a), b: Number(g.b) }));
 
     if (games.some((g) => !Number.isFinite(g.a) || !Number.isFinite(g.b) || g.a < 0 || g.b < 0)) {
       return setErr(`Enter a score for both teams in all ${gamesPlayed} game${gamesPlayed > 1 ? "s" : ""}.`);
@@ -863,6 +1074,131 @@ export default function TournamentDetails() {
       setErr(String(e?.message || e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Resets a match's score to 0 in every game, without deleting the
+  // record itself — for a match that shouldn't have had a score on it
+  // (e.g. leftover duplicate data) but you want to keep the fixture
+  // (teams/players/court/date) rather than remove it entirely. Uses a
+  // dedicated endpoint that never touches player data, so this works
+  // even on old/broken matches with missing players that would fail
+  // full match validation.
+  async function clearMatchScore(match) {
+    setErr("");
+    setMsg("");
+    if (!id || !match?.id) return;
+
+    const ok = confirm(`Clear the score for ${match.matchup || "this match"}? It will show 0 in every game.`);
+    if (!ok) return;
+
+    setLoading(true);
+    try {
+      await api.clearMatchScore(id, match.id);
+
+      const mRes = await api.listTournamentMatches(id);
+      setMatches(mRes?.items || []);
+      const sRes = await api.getTournamentStandings(id);
+      setStandings(sRes?.standings || []);
+
+      setMsg("Score cleared ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Full inline edit — unlike Clear Score, this lets you fix players too
+  // (useful for the old/junk matches with none recorded), and requires
+  // valid data just like adding a match does. Team/court/date stay as
+  // they were; only players and the score itself are editable here.
+  function startEditMatch(match) {
+    const perSide = match.gameType === "singles" ? 1 : 2;
+    setEditingMatchId(match.id);
+    setEditForm({
+      teamAPlayers: resizePlayers(match.teamAPlayers, perSide),
+      teamBPlayers: resizePlayers(match.teamBPlayers, perSide),
+      gamesPlayed: match.gamesPlayed || 1,
+      games: resizeGames(match.games, match.gamesPlayed || 1),
+    });
+  }
+
+  function cancelEditMatch() {
+    setEditingMatchId("");
+  }
+
+  function setEditFormPlayer(side, idx, value) {
+    setEditForm((f) => {
+      const key = side === "A" ? "teamAPlayers" : "teamBPlayers";
+      const arr = f[key].slice();
+      arr[idx] = value;
+      return { ...f, [key]: arr };
+    });
+  }
+
+  function setEditFormGamesPlayed(value) {
+    const n = Math.min(6, Math.max(1, Number(value) || 1));
+    setEditForm((f) => ({ ...f, gamesPlayed: n, games: resizeGames(f.games, n) }));
+  }
+
+  function setEditFormGameScore(gameIdx, side, value) {
+    setEditForm((f) => {
+      const games = f.games.slice();
+      games[gameIdx] = { ...games[gameIdx], [side]: value };
+      return { ...f, games };
+    });
+  }
+
+  async function saveEditMatch(match) {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can edit matches.");
+
+    const perSide = match.gameType === "singles" ? 1 : 2;
+    const players = editForm.teamAPlayers.map((p) => trim(p)).filter(Boolean);
+    const playersB = editForm.teamBPlayers.map((p) => trim(p)).filter(Boolean);
+    if (players.length !== perSide || playersB.length !== perSide) {
+      return setErr(
+        `${match.gameType === "singles" ? "Singles" : "Doubles"} matches need exactly ${perSide} player${
+          perSide > 1 ? "s" : ""
+        } per team.`
+      );
+    }
+    if (editForm.games.some((g) => trim(g.a) === "" || trim(g.b) === "")) {
+      return setErr(`Enter a score for both teams in all ${editForm.gamesPlayed} game${editForm.gamesPlayed > 1 ? "s" : ""}.`);
+    }
+    const games = editForm.games.map((g) => ({ a: Number(g.a), b: Number(g.b) }));
+    if (games.some((g) => !Number.isFinite(g.a) || !Number.isFinite(g.b) || g.a < 0 || g.b < 0)) {
+      return setErr("Scores must be valid, non-negative numbers.");
+    }
+
+    setErr("");
+    setMsg("");
+    setSavingEdit(true);
+    try {
+      await api.updateTournamentMatch(id, match.id, {
+        date: match.date,
+        court: match.court,
+        gameType: match.gameType,
+        teamAId: match.teamAId,
+        teamBId: match.teamBId,
+        teamAPlayers: players,
+        teamBPlayers: playersB,
+        gamesPlayed: editForm.gamesPlayed,
+        games,
+        notes: match.notes,
+      });
+
+      const mRes = await api.listTournamentMatches(id);
+      setMatches(mRes?.items || []);
+      const sRes = await api.getTournamentStandings(id);
+      setStandings(sRes?.standings || []);
+
+      setEditingMatchId("");
+      setMsg("Match updated ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -1183,6 +1519,84 @@ export default function TournamentDetails() {
               Build Team Inputs
             </button>
 
+            {/* Player Pool — a reusable, tournament-wide list of players.
+                Grows automatically from team rosters and schedule fixtures,
+                and can be managed directly here too. Powers the autocomplete
+                on roster inputs and the player pickers on the schedule. */}
+            <div className="mt-4 rounded-xl border border-line bg-surface2 p-4">
+              <div className="text-sm font-semibold">Player Pool</div>
+              <div className="mt-1 text-xs text-muted">
+                Add players here once and reuse them on any team or schedule fixture — no need to retype names.
+                Names used on a roster or in the schedule are added here automatically too.
+              </div>
+
+              {canEditTournament && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    value={newPoolPlayer}
+                    onChange={(e) => setNewPoolPlayer(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addPoolPlayer();
+                      }
+                    }}
+                    placeholder="Add a new player…"
+                    className="min-w-[180px] flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
+                    disabled={loading || savingPool}
+                  />
+                  <button
+                    type="button"
+                    onClick={addPoolPlayer}
+                    disabled={loading || savingPool}
+                    className="rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium transition hover:bg-line disabled:opacity-40"
+                  >
+                    + Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={savePlayerPool}
+                    disabled={loading || savingPool}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
+                  >
+                    {savingPool ? "Saving..." : "Save Pool"}
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {playerPool.length === 0 ? (
+                  <span className="text-xs text-muted">No players in the pool yet.</span>
+                ) : (
+                  playerPool.map((p) => (
+                    <span
+                      key={p}
+                      className="flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-xs"
+                    >
+                      {p}
+                      {canEditTournament && (
+                        <button
+                          type="button"
+                          onClick={() => removePoolPlayer(p)}
+                          className="text-muted hover:text-red-600 dark:hover:text-red-400"
+                          title={`Remove ${p} from the pool`}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Autocomplete suggestions for roster/fixture player inputs, sourced from the pool above */}
+            <datalist id="player-pool-list">
+              {playerPool.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+
             {/* Roster table: one row per team, one column per player slot */}
             <div className="mt-4 overflow-x-auto rounded-xl border border-line">
               <table className="w-full min-w-[480px] text-sm">
@@ -1225,6 +1639,7 @@ export default function TournamentDetails() {
                             value={p}
                             onChange={(e) => setPlayer(idx, pIdx, e.target.value)}
                             placeholder={`Player ${pIdx + 1}`}
+                            list="player-pool-list"
                             className="w-full min-w-[130px] rounded-lg border border-line bg-surface2 px-2.5 py-1.5"
                             disabled={loading || !canEditTournament}
                           />
@@ -1525,6 +1940,7 @@ export default function TournamentDetails() {
                                         <th className="whitespace-nowrap py-2 text-left">Team B</th>
                                         <th className="whitespace-nowrap py-2 text-left">Team B players</th>
                                         <th className="whitespace-nowrap py-2 text-left">Games</th>
+                                        <th className="whitespace-nowrap py-2 text-left">Score</th>
                                         <th className="whitespace-nowrap py-2 pr-3 text-right">Action</th>
                                       </tr>
                                     </thead>
@@ -1535,6 +1951,8 @@ export default function TournamentDetails() {
                                         const perSide = fx.gameType === "singles" ? 1 : 2;
                                         const rosterA = teamA?.players || [];
                                         const rosterB = teamB?.players || [];
+                                        const poolExtrasA = playerPool.filter((p) => !rosterA.includes(p));
+                                        const poolExtrasB = playerPool.filter((p) => !rosterB.includes(p));
                                         return (
                                           <tr key={fxIdx} className="border-t border-line bg-surface align-top">
                                             <td className="py-2 pl-3">
@@ -1566,19 +1984,33 @@ export default function TournamentDetails() {
                                                     key={pIdx}
                                                     value={fx.teamAPlayers?.[pIdx] || ""}
                                                     onChange={(e) =>
-                                                      setFixturePlayer(weekIdx, fxIdx, "A", pIdx, e.target.value)
+                                                      handleFixturePlayerSelect(weekIdx, fxIdx, "A", pIdx, e.target.value)
                                                     }
                                                     disabled={!canEditTournament}
-                                                    className="min-w-[120px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
+                                                    className="min-w-[140px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
                                                   >
                                                     <option value="">
                                                       {rosterA.length ? `Player ${pIdx + 1}` : "No roster"}
                                                     </option>
-                                                    {rosterA.map((p) => (
-                                                      <option key={p} value={p}>
-                                                        {p}
-                                                      </option>
-                                                    ))}
+                                                    {rosterA.length > 0 && (
+                                                      <optgroup label="Team roster">
+                                                        {rosterA.map((p) => (
+                                                          <option key={p} value={p}>
+                                                            {p}
+                                                          </option>
+                                                        ))}
+                                                      </optgroup>
+                                                    )}
+                                                    {poolExtrasA.length > 0 && (
+                                                      <optgroup label="Other pool players">
+                                                        {poolExtrasA.map((p) => (
+                                                          <option key={p} value={p}>
+                                                            {p}
+                                                          </option>
+                                                        ))}
+                                                      </optgroup>
+                                                    )}
+                                                    <option value="__add_new__">+ Add new player…</option>
                                                   </select>
                                                 ))}
                                               </div>
@@ -1593,19 +2025,33 @@ export default function TournamentDetails() {
                                                     key={pIdx}
                                                     value={fx.teamBPlayers?.[pIdx] || ""}
                                                     onChange={(e) =>
-                                                      setFixturePlayer(weekIdx, fxIdx, "B", pIdx, e.target.value)
+                                                      handleFixturePlayerSelect(weekIdx, fxIdx, "B", pIdx, e.target.value)
                                                     }
                                                     disabled={!canEditTournament}
-                                                    className="min-w-[120px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
+                                                    className="min-w-[140px] rounded-lg border border-line bg-surface2 px-2 py-1 text-xs disabled:opacity-60"
                                                   >
                                                     <option value="">
                                                       {rosterB.length ? `Player ${pIdx + 1}` : "No roster"}
                                                     </option>
-                                                    {rosterB.map((p) => (
-                                                      <option key={p} value={p}>
-                                                        {p}
-                                                      </option>
-                                                    ))}
+                                                    {rosterB.length > 0 && (
+                                                      <optgroup label="Team roster">
+                                                        {rosterB.map((p) => (
+                                                          <option key={p} value={p}>
+                                                            {p}
+                                                          </option>
+                                                        ))}
+                                                      </optgroup>
+                                                    )}
+                                                    {poolExtrasB.length > 0 && (
+                                                      <optgroup label="Other pool players">
+                                                        {poolExtrasB.map((p) => (
+                                                          <option key={p} value={p}>
+                                                            {p}
+                                                          </option>
+                                                        ))}
+                                                      </optgroup>
+                                                    )}
+                                                    <option value="__add_new__">+ Add new player…</option>
                                                   </select>
                                                 ))}
                                               </div>
@@ -1631,23 +2077,88 @@ export default function TournamentDetails() {
                                                 fx.gamesPlayed
                                               )}
                                             </td>
-                                            <td className="whitespace-nowrap py-2 pr-3 text-right">
-                                              <div className="flex justify-end gap-1.5">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => useFixture(fx, week.date)}
-                                                  className="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs font-medium transition hover:bg-line"
-                                                >
-                                                  Use
-                                                </button>
-                                                {canEditTournament && (
+                                            <td className="py-2">
+                                              {canEditTournament ? (
+                                                <div className="flex flex-col gap-1">
+                                                  {Array.from({ length: fx.gamesPlayed }).map((_, gIdx) => {
+                                                    const g = resizeGames(fx.games, fx.gamesPlayed)[gIdx] || {
+                                                      a: "",
+                                                      b: "",
+                                                    };
+                                                    return (
+                                                      <div key={gIdx} className="flex items-center gap-1">
+                                                        <input
+                                                          type="number"
+                                                          value={g.a}
+                                                          onChange={(e) =>
+                                                            setFixtureGameScore(weekIdx, fxIdx, gIdx, "a", e.target.value)
+                                                          }
+                                                          placeholder="A"
+                                                          className="w-12 rounded-lg border border-line bg-surface2 px-1.5 py-1 text-xs"
+                                                        />
+                                                        <span className="text-muted">–</span>
+                                                        <input
+                                                          type="number"
+                                                          value={g.b}
+                                                          onChange={(e) =>
+                                                            setFixtureGameScore(weekIdx, fxIdx, gIdx, "b", e.target.value)
+                                                          }
+                                                          placeholder="B"
+                                                          className="w-12 rounded-lg border border-line bg-surface2 px-1.5 py-1 text-xs"
+                                                        />
+                                                      </div>
+                                                    );
+                                                  })}
                                                   <button
                                                     type="button"
-                                                    onClick={() => removeFixture(weekIdx, fxIdx)}
-                                                    title="Remove this fixture from the week"
-                                                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
+                                                    onClick={() => recordFixtureMatch(weekIdx, fxIdx)}
+                                                    disabled={loading}
+                                                    className="mt-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
                                                   >
-                                                    Remove
+                                                    {fx.matchId ? "Update Score" : "Record Score"}
+                                                  </button>
+                                                  {fx.matchId && (
+                                                    <span className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                                                      ✓ Recorded in Matches
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              ) : fx.matchId ? (
+                                                <Pill tone="live">Recorded</Pill>
+                                              ) : (
+                                                <span className="text-muted">—</span>
+                                              )}
+                                            </td>
+                                            <td className="whitespace-nowrap py-2 pr-3 text-right">
+                                              <div className="flex flex-col items-end gap-1.5">
+                                                <div className="flex justify-end gap-1.5">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => useFixture(fx, week.date)}
+                                                    className="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs font-medium transition hover:bg-line"
+                                                  >
+                                                    Use
+                                                  </button>
+                                                  {canEditTournament && (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => removeFixture(weekIdx, fxIdx)}
+                                                      title="Remove this fixture from the week"
+                                                      className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 transition hover:bg-red-500/15 dark:text-red-300"
+                                                    >
+                                                      Remove
+                                                    </button>
+                                                  )}
+                                                </div>
+                                                {canEditTournament && fx.matchId && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => deleteFixtureMatch(weekIdx, fxIdx)}
+                                                    disabled={loading}
+                                                    title="Delete the recorded match/score"
+                                                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 transition hover:bg-red-500/15 disabled:opacity-40 dark:text-red-300"
+                                                  >
+                                                    Delete Score
                                                   </button>
                                                 )}
                                               </div>
@@ -1968,7 +2479,8 @@ export default function TournamentDetails() {
                     </tr>
                   ) : (
                     sortedMatches.map((m) => (
-                      <tr key={m.id} className="border-t border-line">
+                      <React.Fragment key={m.id}>
+                      <tr className="border-t border-line">
                         <td className="whitespace-nowrap py-2.5 pl-3 text-muted">{m.date || "—"}</td>
                         <td className="whitespace-nowrap py-2.5 text-muted">{m.court || "—"}</td>
                         <td className="whitespace-nowrap py-2.5 text-muted capitalize">{m.gameType || "—"}</td>
@@ -2015,18 +2527,170 @@ export default function TournamentDetails() {
                         </td>
                         <td className="whitespace-nowrap py-2.5 pr-3 text-right">
                           {canDeleteMatch(m) ? (
-                            <button
-                              onClick={() => onDeleteMatch(m.id)}
-                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-700 transition hover:bg-red-500/15 disabled:opacity-40 dark:text-red-300"
-                              disabled={loading}
-                            >
-                              Delete
-                            </button>
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() =>
+                                  editingMatchId === m.id ? cancelEditMatch() : startEditMatch(m)
+                                }
+                                className="rounded-lg border border-line bg-surface2 px-2 py-1 text-[11px] font-medium transition hover:bg-line disabled:opacity-40"
+                                disabled={loading}
+                              >
+                                {editingMatchId === m.id ? "Cancel" : "Edit"}
+                              </button>
+                              <button
+                                onClick={() => clearMatchScore(m)}
+                                className="rounded-lg border border-line bg-surface2 px-2 py-1 text-[11px] font-medium transition hover:bg-line disabled:opacity-40"
+                                disabled={loading}
+                                title="Reset this match's score to 0 without deleting it"
+                              >
+                                Clear Score
+                              </button>
+                              <button
+                                onClick={() => onDeleteMatch(m.id)}
+                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-700 transition hover:bg-red-500/15 disabled:opacity-40 dark:text-red-300"
+                                disabled={loading}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-muted">—</span>
                           )}
                         </td>
                       </tr>
+
+                      {editingMatchId === m.id && (
+                        <tr className="border-t border-line bg-surface2">
+                          <td colSpan={9} className="p-4">
+                            {(() => {
+                              const perSide = m.gameType === "singles" ? 1 : 2;
+                              const rosterA = teamsById.get(String(m.teamAId))?.players || [];
+                              const rosterB = teamsById.get(String(m.teamBId))?.players || [];
+                              return (
+                                <div className="space-y-3">
+                                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted">
+                                        {teamsById.get(String(m.teamAId))?.name || "Team A"} — players
+                                      </div>
+                                      <div className="mt-2 space-y-1.5">
+                                        {Array.from({ length: perSide }).map((_, pIdx) => (
+                                          <select
+                                            key={pIdx}
+                                            value={editForm.teamAPlayers[pIdx] || ""}
+                                            onChange={(e) => setEditFormPlayer("A", pIdx, e.target.value)}
+                                            className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+                                          >
+                                            <option value="">Player {pIdx + 1}</option>
+                                            {rosterA.map((p) => (
+                                              <option key={p} value={p}>
+                                                {p}
+                                              </option>
+                                            ))}
+                                            {playerPool
+                                              .filter((p) => !rosterA.includes(p))
+                                              .map((p) => (
+                                                <option key={p} value={p}>
+                                                  {p} (pool)
+                                                </option>
+                                              ))}
+                                          </select>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs uppercase tracking-wide text-muted">
+                                        {teamsById.get(String(m.teamBId))?.name || "Team B"} — players
+                                      </div>
+                                      <div className="mt-2 space-y-1.5">
+                                        {Array.from({ length: perSide }).map((_, pIdx) => (
+                                          <select
+                                            key={pIdx}
+                                            value={editForm.teamBPlayers[pIdx] || ""}
+                                            onChange={(e) => setEditFormPlayer("B", pIdx, e.target.value)}
+                                            className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+                                          >
+                                            <option value="">Player {pIdx + 1}</option>
+                                            {rosterB.map((p) => (
+                                              <option key={p} value={p}>
+                                                {p}
+                                              </option>
+                                            ))}
+                                            {playerPool
+                                              .filter((p) => !rosterB.includes(p))
+                                              .map((p) => (
+                                                <option key={p} value={p}>
+                                                  {p} (pool)
+                                                </option>
+                                              ))}
+                                          </select>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="text-xs uppercase tracking-wide text-muted">Games Played</label>
+                                    <select
+                                      value={editForm.gamesPlayed}
+                                      onChange={(e) => setEditFormGamesPlayed(e.target.value)}
+                                      className="mt-2 w-32 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+                                    >
+                                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                                        <option key={n} value={n}>
+                                          {n} {n === 1 ? "game" : "games"}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-3">
+                                    {editForm.games.map((g, gIdx) => (
+                                      <div key={gIdx} className="flex items-center gap-1.5">
+                                        <span className="text-xs text-muted">G{gIdx + 1}</span>
+                                        <input
+                                          type="number"
+                                          value={g.a}
+                                          onChange={(e) => setEditFormGameScore(gIdx, "a", e.target.value)}
+                                          placeholder="A"
+                                          className="w-14 rounded-lg border border-line bg-surface px-2 py-1 text-sm"
+                                        />
+                                        <span className="text-muted">–</span>
+                                        <input
+                                          type="number"
+                                          value={g.b}
+                                          onChange={(e) => setEditFormGameScore(gIdx, "b", e.target.value)}
+                                          placeholder="B"
+                                          className="w-14 rounded-lg border border-line bg-surface px-2 py-1 text-sm"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => saveEditMatch(m)}
+                                      disabled={savingEdit}
+                                      className="rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
+                                    >
+                                      {savingEdit ? "Saving..." : "Save Changes"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={cancelEditMatch}
+                                      className="rounded-xl border border-line bg-surface px-3 py-2 text-xs font-medium transition hover:bg-line"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     ))
                   )}
                 </tbody>

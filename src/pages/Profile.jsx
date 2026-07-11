@@ -11,6 +11,8 @@ export default function Profile() {
   const email = getUserEmail();
 
   const [displayName, setDisplayName] = useState("");
+  const [duprId, setDuprId] = useState("");
+  const [duprRating, setDuprRating] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
@@ -27,6 +29,8 @@ export default function Profile() {
 
         const fallback = emailPrefix(email);
         setDisplayName((me.displayName || "").trim() || fallback);
+        setDuprId(me.duprId || "");
+        setDuprRating(me.duprRating != null ? String(me.duprRating) : "");
       } catch (e) {
         if (!alive) return;
         setErr(e.message || "Failed to load profile");
@@ -49,8 +53,17 @@ export default function Profile() {
       return;
     }
 
+    const ratingTrim = (duprRating || "").trim();
+    if (ratingTrim) {
+      const n = Number(ratingTrim);
+      if (!Number.isFinite(n) || n < 2.0 || n > 8.0) {
+        setErr("DUPR rating must be a number between 2.0 and 8.0.");
+        return;
+      }
+    }
+
     try {
-      await api.putMe({ displayName: name });
+      await api.putMe({ displayName: name, duprId: duprId.trim(), duprRating: ratingTrim || null });
       setMsg("Saved ✅");
     } catch (e2) {
       setErr(e2.message || "Save failed");
@@ -104,6 +117,35 @@ export default function Profile() {
                 <div className="mt-2 text-xs text-muted">
                   This will be used as the “player” name for bookings/matches.
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-xs text-muted">DUPR ID (optional)</label>
+                  <input
+                    value={duprId}
+                    onChange={(e) => setDuprId(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
+                    placeholder="e.g., ABC123"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted">DUPR Rating (optional)</label>
+                  <input
+                    value={duprRating}
+                    onChange={(e) => setDuprRating(e.target.value)}
+                    type="number"
+                    step="0.001"
+                    min="2"
+                    max="8"
+                    className="mt-2 w-full rounded-xl border border-line bg-surface2 px-3 py-2"
+                    placeholder="e.g., 4.125"
+                  />
+                </div>
+              </div>
+              <div className="-mt-2 text-xs text-muted">
+                Entered manually — DUPR doesn't offer a self-serve API for live syncing yet. Find your rating and ID
+                in the DUPR app under your profile.
               </div>
 
               <div className="flex flex-wrap gap-2">

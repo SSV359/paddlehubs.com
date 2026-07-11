@@ -159,6 +159,18 @@ export const api = {
       body: payload,
     });
   },
+  updateTournamentMatch(tournamentId, matchId, payload) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`, {
+      method: "PUT",
+      body: payload,
+    });
+  },
+  clearMatchScore(tournamentId, matchId) {
+    return req(
+      `/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}/clear-score`,
+      { method: "PUT" }
+    );
+  },
   deleteTournamentMatch(tournamentId, matchId) {
     return req(
       `/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}`,
@@ -215,6 +227,12 @@ export const api = {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/registration-window`, {
       method: "PUT",
       body: payload,
+    });
+  },
+  updatePlayerPool(tournamentId, playerPool) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/player-pool`, {
+      method: "PUT",
+      body: { playerPool },
     });
   },
 

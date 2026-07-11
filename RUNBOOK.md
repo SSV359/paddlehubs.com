@@ -44,7 +44,7 @@ section 5 (Player Rankings) for how ranking data is actually computed.
 Vite inlines `VITE_*` variables into the JS bundle **at build time**, not
 runtime. If `.env` is missing or incomplete when you run `npm run build`,
 the bundle will contain literal `undefined` in their place — the login
-button will silently fail (see section 10, Troubleshooting).
+button will silently fail (see section 13, Troubleshooting).
 
 ### Backend (Lambda environment variables)
 
@@ -287,7 +287,73 @@ browser network tab for the `POST .../analytics/pageview` call — a 401
 there means the authorizer got attached by habit; remove it from that
 one route specifically.
 
-## 8. Feature: Tournament Registration Links
+## 8. Feature: Player Pool
+
+A tournament-wide, reusable list of player names — set up once, pick from
+it everywhere instead of retyping names on every team or every schedule
+fixture.
+
+- **Grows automatically**: saving a team roster (`updateTournamentTeams`)
+  or saving a schedule (`saveTournamentSchedule`) merges whatever names
+  were used into the tournament's `playerPool` array server-side
+  (`mergePlayerPool()` — case-insensitive de-dupe, first-seen casing
+  wins, alphabetically sorted). You don't have to manage it by hand for
+  this to work.
+- **Directly manageable too**: the "Player Pool" panel inside Teams &
+  Players lets you add a player before they're on any roster, or remove
+  one, then **Save Pool** persists it via its own endpoint
+  (`PUT /tournaments/{id}/player-pool`) — kept separate from the
+  team-save endpoint for the same reason the registration window is
+  separate: editing the pool should never risk touching roster data.
+- **Roster inputs get autocomplete**: a `<datalist>` populated from the
+  pool backs every player-name `<input>` in the roster table — still
+  free text, just with suggestions.
+- **Schedule fixture pickers now show two groups**: "Team roster" (that
+  fixture's own team) and "Other pool players" (everyone else in the
+  pool — useful for subs who aren't on the formal roster), plus a
+  "+ Add new player…" option that prompts for a name, adds it to the
+  pool, and picks it immediately.
+
+**Required setup — one new API Gateway route:**
+
+`PUT /tournaments/{id}/player-pool` — **with** the `paddlehubs-cognito-jwt`
+authorizer (admin/owner-checked inside the Lambda too), deployed to your
+stage.
+
+## 9. Feature: Recording Scores Directly on the Schedule
+
+Each fixture in the Match Schedule now has inline score inputs (one pair
+per game, matching that fixture's games count) plus a **Record Score**
+button — no more jumping to Add Match and re-selecting everything.
+
+- **Reuses the exact same backend logic as Add Match**: `Record Score`
+  calls the same validated `createTournamentMatch` path (player
+  requirements, games-won winner logic, etc.) — this isn't a separate,
+  looser code path.
+- **Update, not just create**: once a fixture has a recorded match
+  (shown as "✓ Recorded in Matches"), the button becomes **Update
+  Score** and calls a new `PUT /tournaments/{id}/matches/{matchId}`
+  endpoint instead — same validation, edits the existing match in place
+  rather than creating a duplicate.
+- **Delete Score**: removes the recorded match entirely (with a
+  confirmation prompt) and clears the fixture back to unrecorded, so a
+  mistake can be undone without leaving orphaned data.
+- **The link persists**: each fixture stores the resulting `matchId`,
+  saved back onto the schedule itself, so reloading the page still shows
+  "Recorded" and lets you edit or delete it later — and the score inputs
+  are re-hydrated from the actual match record on load, not left blank.
+- Backend implementation note: `createTournamentMatch` and the new
+  update function now share one `validateMatchPayload()` helper — the
+  validation logic was extracted rather than duplicated, so a future fix
+  to match validation only needs to happen in one place.
+
+**Required setup — one new API Gateway route:**
+
+`PUT /tournaments/{id}/matches/{matchId}` — **with** the
+`paddlehubs-cognito-jwt` authorizer (admin/owner-checked inside the
+Lambda too, same as match deletion already is).
+
+## 10. Feature: Tournament Registration Links
 
 A shareable public link per tournament lets prospective players sign up
 without needing an account, plus a paid/unpaid tracker for admins.
@@ -344,7 +410,7 @@ without needing an account, plus a paid/unpaid tracker for admins.
 Deploy the stage after adding these, same as every other route in this
 project.
 
-## 9. Design system reference
+## 11. Design system reference
 
 - **Tokens**: `src/index.css` — CSS custom properties for three palettes
   (`hardcourt`, `clay`, `grandslam`), each with a light and dark variant,
@@ -365,7 +431,30 @@ project.
   (`public/favicon.svg`) is a fixed-color copy (Hard Court palette) since
   favicons load before the app's theme system exists.
 
-## 10. Troubleshooting
+## 12. Feature: DUPR Rating (manual, name-matched)
+
+DUPR (Dynamic Universal Pickleball Rating) is the sport's standard
+2.000–8.000 rating scale. **This is a manual field, not a live sync** —
+DUPR doesn't offer a self-serve API; live integration requires a formal
+DUPR digital-club partnership (see https://www.dupr.com/club-resources),
+which is a business process outside what this codebase can set up on its
+own.
+
+- Each registered member can enter their own **DUPR ID** and **DUPR
+  rating** (2.0–8.0, validated both client- and server-side) on the
+  Profile page — stored on their `PLAYERS_TABLE` record.
+- **Player Rankings** shows a DUPR column, populated by matching a
+  tournament roster player's name against a registered member's display
+  name (case-insensitive, via the same `normalizePlayerKey()` helper
+  used for the rankings themselves). This is a **best-effort name
+  match, not an account link** — roster players are free-text names, so
+  a player with no matching account, or an account with no DUPR entered,
+  simply shows "—". Enrichment failures are swallowed (logged, not
+  thrown) so a lookup problem can never break rankings entirely.
+- No new API Gateway routes — this reuses the existing `PUT /me` and
+  player-rankings routes, just with additional fields/enrichment.
+
+## 13. Troubleshooting
 
 **Login button does nothing, no navigation, no visible error.**
 Check the Network tab for a request like `login?client_id=undefined&...`.
@@ -412,7 +501,84 @@ first place to check.
 Only matches created after the player-rankings feature shipped have the
 per-player data needed to be counted.
 
-## 11. Mobile apps (iOS & Android via Capacitor)
+**Deleting or updating a specific match returns 404 "Match not found" —
+routes and authorizer all check out fine.** This was a genuine backend
+bug in how matches get looked up by ID, in `findClubEventById`,
+`getTournamentRecord`'s fallback path, `updateTournamentMatchAuthorized`,
+and `deleteTournamentMatchAuthorized`. All four used
+`FilterExpression: "id = :id"` together with `Limit: 1` on the
+DynamoDB `Query`. **DynamoDB applies `Limit` to items *scanned*, before
+the filter runs — not to items *returned* after filtering.** With
+`Limit: 1`, the query only ever examined the single first item in the
+partition (by sort-key order) and then checked if *that one* matched —
+it never got to look at the rest. This "worked" by pure luck early on,
+when the target match often happened to be the first one scanned, and
+started failing consistently once a tournament accumulated more than a
+handful of matches (the odds of the target being scanned first became
+essentially zero). Fixed by removing `Limit` entirely from all four
+functions, so the query scans the whole partition and the filter runs
+against everything. Also fixed a related bug this exposed: **retrying a
+failed "Update Score" as "Record Score" instead was silently creating
+duplicate match records** rather than editing the existing one, since
+the update path kept 404ing. If you have duplicate/junk matches from
+before this fix, they need to be cleaned up manually via Delete — there
+was no way to distinguish "real" duplicates from legitimate scores after
+the fact.
+
+**A score field left blank got silently recorded as `0` instead of
+showing a validation error.** `Number("")` evaluates to `0` in
+JavaScript, which passed the existing `Number.isFinite(...)` check as if
+it were a real score. Fixed by explicitly checking for blank fields
+before converting to numbers, in both the schedule's inline score
+recording and the regular Add Match form.
+
+**"Clear Score" fails with `"Doubles matches need exactly 2 players per
+team"` on old/junk matches.** Many of the duplicate matches created by
+the `Limit`/`FilterExpression` bug above have empty `teamAPlayers`/
+`teamBPlayers` (that's the "—" you see in the Players column). The
+original "Clear Score" implementation reused the general match-update
+endpoint, which — correctly, for a real edit — insists on valid players.
+But clearing a score should never need to touch player data at all.
+Fixed by giving Clear Score its own dedicated endpoint
+(`clearTournamentMatchScoreAuthorized` /
+`PUT /tournaments/{id}/matches/{matchId}/clear-score`) that only ever
+overwrites the score fields (`games`, `scoreA`/`scoreB`,
+`gamesWonA`/`gamesWonB`, `winnerTeamId`/`winner`) and leaves everything
+else — including broken/missing player data — untouched. This means
+Clear Score now works even on matches that could never pass full
+validation, which is exactly the case it needs to handle.
+
+**Editing a match directly from the Matches table** ("Edit" button, next
+to Clear Score and Delete): unlike Clear Score, this is a genuine full
+edit — it lets you fix players (useful for exactly the matches Clear
+Score can't touch player-wise) and the score together. Opens an inline
+row beneath the match with player dropdowns (sourced from that team's
+roster plus the tournament's player pool) and per-game score inputs.
+Saving goes through the same `PUT /tournaments/{id}/matches/{matchId}`
+endpoint as everything else, so it enforces the same player-count rules
+as adding a match — this is intentional: fixing a match should mean
+supplying real data, not bypassing validation the way Clear Score does.
+Team, court, date, and game type are not editable here (only players and
+score) — changing which teams played is a bigger edit than this is meant
+for.
+
+**Team Standings or Player Rankings show points that don't match a
+simple wins × 1 calculation, after clearing some match scores.** This
+was a real bug: "Clear Score" deliberately sets `winnerTeamId` to a
+blank string (not `"TIE"`) to mark a match as "this never really
+happened." But `computeStandings` and `computePlayerStandings` both had
+a fallback that treated `scoreA === scoreB` as a tie whenever
+`winnerTeamId` was empty — and a cleared match is always `0 === 0`, so
+every cleared match was silently counted as a genuine tie, awarding
+`TEAM_TIE_POINTS`/`PLAYER_TIE_POINTS` to both sides. Fixed by having
+both functions skip a match entirely (no points, no games-played
+increment, nothing) whenever `winnerTeamId` is blank, rather than
+falling through to the tie-inference logic. If you cleared any scores
+before this fix, refreshing Standings/Rankings after deploying should
+correct the totals automatically — no manual data fix needed, since
+standings are computed fresh from match data every time, not stored.
+
+## 14. Mobile apps (iOS & Android via Capacitor)
 
 The React app is wrapped as real installable iOS/Android apps using
 [Capacitor](https://capacitorjs.com/) — it reuses 100% of the existing
@@ -506,7 +672,7 @@ intent filter to the existing `MainActivity` entry:
   credentials), it satisfies both Apple's and Google's third-party login
   review requirements out of the box
 
-## 12. Known housekeeping
+## 15. Known housekeeping
 
 - A stray `paddlehubs-site/` subfolder (leftover debris with an old
   `index.html` and `eslint.config.js`) and unused Vite boilerplate CSS

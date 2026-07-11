@@ -163,6 +163,17 @@ async function putMe({ sub, email }, body) {
   const displayName = trim(body.displayName);
   if (!displayName) return { error: "Display name is required." };
 
+  const duprId = trim(body.duprId).slice(0, 50);
+
+  let duprRating = null;
+  if (body.duprRating !== undefined && body.duprRating !== null && body.duprRating !== "") {
+    const n = Number(body.duprRating);
+    if (!Number.isFinite(n) || n < 2.0 || n > 8.0) {
+      return { error: "DUPR rating must be a number between 2.0 and 8.0" };
+    }
+    duprRating = Math.round(n * 1000) / 1000; // DUPR shows 3 decimal places
+  }
+
   const now = new Date().toISOString();
 
   await ddb.send(
@@ -170,10 +181,12 @@ async function putMe({ sub, email }, body) {
       TableName: PLAYERS_TABLE,
       Key: { clubId: CLUB_ID, userSub: sub },
       UpdateExpression:
-        "SET displayName = :dn, email = if_not_exists(email,:em), updatedAt = :u, createdAt = if_not_exists(createdAt,:c)",
+        "SET displayName = :dn, email = if_not_exists(email,:em), duprId = :did, duprRating = :dr, updatedAt = :u, createdAt = if_not_exists(createdAt,:c)",
       ExpressionAttributeValues: {
         ":dn": displayName,
         ":em": email || "",
+        ":did": duprId,
+        ":dr": duprRating,
         ":u": now,
         ":c": now,
       },
@@ -229,7 +242,12 @@ async function findClubEventById(typePrefix, id) {
         ":p": typePrefix,
         ":id": id,
       },
-      Limit: 1,
+      // No Limit here on purpose — DynamoDB applies Limit to items
+      // *scanned*, before the FilterExpression runs, not to items
+      // returned after filtering. With a Limit, this would only ever
+      // find the target if it happened to be among the first few items
+      // scanned — which silently breaks as data grows. Scan the whole
+      // partition and let the filter do its job.
     })
   );
 
@@ -428,7 +446,7 @@ async function getTournamentRecord(tournamentId) {
       KeyConditionExpression: "clubId = :c AND begins_with(sk, :p)",
       FilterExpression: "id = :id",
       ExpressionAttributeValues: { ":c": CLUB_ID, ":p": "TOURNAMENT#", ":id": tournamentId },
-      Limit: 1,
+      // No Limit — see findClubEventById for why that's deliberate.
     })
   );
   const item = (res.Items || [])[0] || null;
@@ -552,17 +570,22 @@ async function updateTournamentTeams({ sub }, isAdmin, tournamentId, body) {
   if (!teams.length) return { error: "Please provide teams[]" };
   if (teams.some((tt) => !tt.name)) return { error: "Each team must have a name" };
 
+  // The player pool grows automatically from whoever's on a roster —
+  // on top of whatever's already been added to the pool directly.
+  const playerPool = mergePlayerPool(t.playerPool, ...teams.map((tt) => tt.players));
+
   const now = new Date().toISOString();
 
   await ddb.send(
     new UpdateCommand({
       TableName: EVENTS_TABLE,
       Key: { clubId: CLUB_ID, sk: rec.sk },
-      UpdateExpression: "SET teamCount=:tc, playersPerTeam=:pp, teams=:teams, updatedAt=:u",
+      UpdateExpression: "SET teamCount=:tc, playersPerTeam=:pp, teams=:teams, playerPool=:pool, updatedAt=:u",
       ExpressionAttributeValues: {
         ":tc": teamCount,
         ":pp": playersPerTeam,
         ":teams": teams,
+        ":pool": playerPool,
         ":u": now,
       },
     })
@@ -571,6 +594,47 @@ async function updateTournamentTeams({ sub }, isAdmin, tournamentId, body) {
   // return fresh
   const updated = await getTournamentRecord(tournamentId);
   return updated?.item || null;
+}
+
+// ---------- PLAYER POOL (tournament-wide, reusable across teams and schedule fixtures) ----------
+function mergePlayerPool(existingPool, ...nameArrays) {
+  const seen = new Map(); // normalized key -> original-cased name (first one wins)
+  for (const name of Array.isArray(existingPool) ? existingPool : []) {
+    const n = trim(name);
+    if (!n) continue;
+    const key = n.toLowerCase();
+    if (!seen.has(key)) seen.set(key, n);
+  }
+  for (const arr of nameArrays) {
+    for (const name of Array.isArray(arr) ? arr : []) {
+      const n = trim(name);
+      if (!n) continue;
+      const key = n.toLowerCase();
+      if (!seen.has(key)) seen.set(key, n);
+    }
+  }
+  return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+}
+
+async function updatePlayerPool({ sub }, isAdmin, tournamentId, body) {
+  const rec = await getTournamentRecord(tournamentId);
+  if (!rec) return { error: "Tournament not found", statusCode: 404 };
+  const t = rec.item;
+  if (!isAdmin && t.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  const incoming = Array.isArray(body.playerPool) ? body.playerPool : [];
+  const playerPool = mergePlayerPool([], incoming); // dedupe/sort/trim whatever was sent, full replace
+
+  await ddb.send(
+    new UpdateCommand({
+      TableName: EVENTS_TABLE,
+      Key: { clubId: CLUB_ID, sk: rec.sk },
+      UpdateExpression: "SET playerPool = :p, updatedAt = :u",
+      ExpressionAttributeValues: { ":p": playerPool, ":u": new Date().toISOString() },
+    })
+  );
+
+  return { ok: true, playerPool };
 }
 
 // ---------- MATCH SCHEDULE (weekly plan across the tournament, saved separately from actual matches) ----------
@@ -657,6 +721,21 @@ async function saveTournamentSchedule({ sub }, isAdmin, tournamentId, body) {
       },
     })
   );
+
+  // Anyone scheduled to play (even as a sub not on the formal roster)
+  // joins the player pool too, so they're pickable next time.
+  const allFixturePlayers = weeks.flatMap((w) => w.fixtures.flatMap((f) => [...f.teamAPlayers, ...f.teamBPlayers]));
+  if (allFixturePlayers.length) {
+    const playerPool = mergePlayerPool(t.playerPool, allFixturePlayers);
+    await ddb.send(
+      new UpdateCommand({
+        TableName: EVENTS_TABLE,
+        Key: { clubId: CLUB_ID, sk: rec.sk },
+        UpdateExpression: "SET playerPool = :p",
+        ExpressionAttributeValues: { ":p": playerPool },
+      })
+    );
+  }
 
   return { weeks, updatedAt: now };
 }
@@ -879,7 +958,7 @@ function computeWinnerTeamId({ teamAId, teamBId, winnerTeamId, scoreA, scoreB })
   return a > b ? teamAId : teamBId;
 }
 
-async function createTournamentMatch({ sub, email }, tournamentId, body) {
+async function validateMatchPayload(tournamentId, body) {
   const date = trim(body.date);
   const court = String(body.court || "Court 1").trim();
   const gameType = String(body.gameType || "doubles");
@@ -968,6 +1047,31 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
   const winner =
     winnerTeamId === "TIE" ? "Tie" : winnerTeamId === teamAId ? teamA.name : winnerTeamId === teamBId ? teamB.name : "";
 
+  return {
+    date,
+    court,
+    gameType,
+    teamAId,
+    teamBId,
+    gamesPlayed,
+    games,
+    scoreA,
+    scoreB,
+    gamesWonA,
+    gamesWonB,
+    teamAPlayers,
+    teamBPlayers,
+    winnerTeamId,
+    matchup,
+    winner,
+    notes,
+  };
+}
+
+async function createTournamentMatch({ sub, email }, tournamentId, body) {
+  const v = await validateMatchPayload(tournamentId, body);
+  if (v.error) return v;
+
   const me = await getMe({ sub });
   const displayName = (me.displayName || "").trim() || emailPrefix(email);
 
@@ -982,27 +1086,7 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
     id,
     type: "TMATCH",
     tournamentId,
-
-    date,
-    court,
-    gameType,
-
-    teamAId,
-    teamBId,
-    teamAPlayers,
-    teamBPlayers,
-    winnerTeamId,
-    matchup,
-    winner,
-
-    games,
-    gamesPlayed,
-    gamesWonA,
-    gamesWonB,
-    scoreA,
-    scoreB,
-    notes,
-
+    ...v,
     ownerSub: sub,
     ownerEmail: email || "",
     ownerDisplayName: displayName,
@@ -1011,6 +1095,76 @@ async function createTournamentMatch({ sub, email }, tournamentId, body) {
 
   await ddb.send(new PutCommand({ TableName: EVENTS_TABLE, Item: item }));
   return item;
+}
+
+async function updateTournamentMatchAuthorized({ sub }, isAdmin, tournamentId, matchId, body) {
+  const prefix = `TMATCH#${tournamentId}#`;
+  const res = await ddb.send(
+    new QueryCommand({
+      TableName: EVENTS_TABLE,
+      KeyConditionExpression: "clubId = :c AND begins_with(sk, :p)",
+      FilterExpression: "id = :id",
+      ExpressionAttributeValues: { ":c": CLUB_ID, ":p": prefix, ":id": matchId },
+      // No Limit — see findClubEventById for why that's deliberate.
+    })
+  );
+  const existing = (res.Items || [])[0];
+  if (!existing) return { error: "Match not found", statusCode: 404 };
+  if (!isAdmin && existing.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  const v = await validateMatchPayload(tournamentId, body);
+  if (v.error) return v;
+
+  const updatedItem = {
+    ...existing,
+    ...v,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await ddb.send(new PutCommand({ TableName: EVENTS_TABLE, Item: updatedItem }));
+  return updatedItem;
+}
+
+// Resets a match's score to 0 in every game, WITHOUT touching players,
+// teams, court, or date — deliberately bypasses validateMatchPayload's
+// player-count check, since a match with broken/missing player data
+// (e.g. a leftover duplicate from a past bug) still needs to be
+// clearable even though it could never pass full match validation.
+async function clearTournamentMatchScoreAuthorized({ sub }, isAdmin, tournamentId, matchId) {
+  const prefix = `TMATCH#${tournamentId}#`;
+  const res = await ddb.send(
+    new QueryCommand({
+      TableName: EVENTS_TABLE,
+      KeyConditionExpression: "clubId = :c AND begins_with(sk, :p)",
+      FilterExpression: "id = :id",
+      ExpressionAttributeValues: { ":c": CLUB_ID, ":p": prefix, ":id": matchId },
+      // No Limit — see findClubEventById for why that's deliberate.
+    })
+  );
+  const existing = (res.Items || [])[0];
+  if (!existing) return { error: "Match not found", statusCode: 404 };
+  if (!isAdmin && existing.ownerSub !== sub) return { error: "Forbidden", statusCode: 403 };
+
+  const gamesPlayed = Math.min(6, Math.max(1, Number(existing.gamesPlayed) || 1));
+  const games = Array.from({ length: gamesPlayed }, () => ({ a: 0, b: 0 }));
+
+  const updatedItem = {
+    ...existing,
+    games,
+    gamesPlayed,
+    scoreA: 0,
+    scoreB: 0,
+    gamesWonA: 0,
+    gamesWonB: 0,
+    // Blank, not "Tie" — this distinguishes a deliberately-cleared score
+    // from a genuine 0-0 tie someone actually recorded.
+    winnerTeamId: "",
+    winner: "",
+    updatedAt: new Date().toISOString(),
+  };
+
+  await ddb.send(new PutCommand({ TableName: EVENTS_TABLE, Item: updatedItem }));
+  return updatedItem;
 }
 
 async function deleteTournamentMatchAuthorized(userSub, isAdmin, tournamentId, matchId) {
@@ -1022,7 +1176,7 @@ async function deleteTournamentMatchAuthorized(userSub, isAdmin, tournamentId, m
       KeyConditionExpression: "clubId = :c AND begins_with(sk, :p)",
       FilterExpression: "id = :id",
       ExpressionAttributeValues: { ":c": CLUB_ID, ":p": prefix, ":id": matchId },
-      Limit: 1,
+      // No Limit — see findClubEventById for why that's deliberate.
     })
   );
 
@@ -1075,6 +1229,14 @@ async function computeStandings(tournamentId) {
     const bId = String(m.teamBId || "");
     if (!base.has(aId) || !base.has(bId)) continue;
 
+    const winId = String(m.winnerTeamId || "");
+    // A cleared match ("Clear Score") deliberately has a blank
+    // winnerTeamId — that's the marker meaning "this never really
+    // happened," not a genuine 0-0 tie. Skip it entirely so it doesn't
+    // silently fall into the sA===sB tie logic below and award points
+    // for a match that was reset specifically to not count.
+    if (!winId) continue;
+
     const a = base.get(aId);
     const b = base.get(bId);
 
@@ -1090,7 +1252,6 @@ async function computeStandings(tournamentId) {
     b.pointsFor += sB;
     b.pointsAgainst += sA;
 
-    const winId = String(m.winnerTeamId || "");
     if (winId === "TIE" || sA === sB) {
       a.ties += 1;
       b.ties += 1;
@@ -1193,13 +1354,14 @@ async function computePlayerStandings({ tournamentId } = {}) {
     if (!aPlayers.length || !bPlayers.length) continue; // older match without per-player data — skip
 
     const winId = String(m.winnerTeamId || "");
-    const sA = Number(m.scoreA ?? 0);
-    const sB = Number(m.scoreB ?? 0);
+    // A cleared match ("Clear Score") deliberately has a blank
+    // winnerTeamId — skip it entirely, same reasoning as team standings.
+    if (!winId) continue;
 
     let aResult, bResult;
-    if (winId === "TIE" || (!winId && sA === sB)) {
+    if (winId === "TIE") {
       aResult = bResult = "tie";
-    } else if (winId ? winId === String(m.teamAId) : sA > sB) {
+    } else if (winId === String(m.teamAId)) {
       aResult = "win";
       bResult = "loss";
     } else {
@@ -1227,6 +1389,33 @@ async function computePlayerStandings({ tournamentId } = {}) {
   }
 
   const list = Array.from(base.values());
+
+  // Best-effort DUPR enrichment — matches a roster player name against a
+  // registered member's display name (case-insensitive). Roster players
+  // are free-text, not accounts, so this is a name match, not a hard
+  // link; players with no matching account (or no DUPR entered) simply
+  // show no rating.
+  try {
+    const activity = await listAllPlayerActivity();
+    const byName = new Map();
+    for (const a of activity.values()) {
+      const key = normalizePlayerKey(a.displayName);
+      if (key) byName.set(key, a);
+    }
+    for (const p of list) {
+      const match = byName.get(normalizePlayerKey(p.player));
+      if (match) {
+        p.duprId = match.duprId || "";
+        p.duprRating = match.duprRating ?? null;
+      } else {
+        p.duprId = "";
+        p.duprRating = null;
+      }
+    }
+  } catch (e) {
+    // DUPR enrichment is a bonus — never let it break rankings.
+    console.error("DUPR enrichment failed:", e);
+  }
 
   list.sort((x, y) => {
     if (y.points !== x.points) return y.points - x.points;
@@ -1318,6 +1507,8 @@ async function listAllPlayerActivity() {
     map.set(item.userSub, {
       displayName: item.displayName || "",
       lastActiveAt: item.lastActiveAt || "",
+      duprId: item.duprId || "",
+      duprRating: item.duprRating ?? null,
     });
   }
   return map;
@@ -1661,6 +1852,16 @@ export async function handler(event) {
       return json(200, r);
     }
 
+    if (routeKey === "PUT /tournaments/{id}/player-pool") {
+      const id = event?.pathParameters?.id;
+      if (!id) return json(400, { error: "Missing tournament id" });
+
+      const r = await updatePlayerPool({ sub: user.sub }, admin, id, body);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+
+      return json(200, r);
+    }
+
     if (routeKey === "POST /tournaments/{id}/register") {
       const id = event?.pathParameters?.id;
       if (!id) return json(400, { error: "Missing tournament id" });
@@ -1717,6 +1918,26 @@ export async function handler(event) {
       if (!id) return json(400, { error: "Missing tournament id" });
       const r = await createTournamentMatch(user, id, body);
       if (r.error) return json(400, r);
+      return json(200, r);
+    }
+
+    if (routeKey === "PUT /tournaments/{id}/matches/{matchId}") {
+      const tournamentId = event?.pathParameters?.id;
+      const matchId = event?.pathParameters?.matchId;
+      if (!tournamentId || !matchId) return json(400, { error: "Missing ids" });
+
+      const r = await updateTournamentMatchAuthorized(user, admin, tournamentId, matchId, body);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
+      return json(200, r);
+    }
+
+    if (routeKey === "PUT /tournaments/{id}/matches/{matchId}/clear-score") {
+      const tournamentId = event?.pathParameters?.id;
+      const matchId = event?.pathParameters?.matchId;
+      if (!tournamentId || !matchId) return json(400, { error: "Missing ids" });
+
+      const r = await clearTournamentMatchScoreAuthorized(user, admin, tournamentId, matchId);
+      if (r?.error) return json(r.statusCode || 400, { error: r.error });
       return json(200, r);
     }
 

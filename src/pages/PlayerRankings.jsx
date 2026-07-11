@@ -147,6 +147,7 @@ export default function PlayerRankings() {
               <tr>
                 <th className="py-2 pr-2 text-left">Rank</th>
                 <th className="py-2 text-left">Player</th>
+                <th className="py-2 px-2 text-right">DUPR</th>
                 <th className="py-2 px-2 text-right">Points</th>
                 <th className="py-2 px-2 text-right">W</th>
                 <th className="py-2 px-2 text-right">L</th>
@@ -164,6 +165,9 @@ export default function PlayerRankings() {
                     </div>
                   </td>
                   <td className="py-2 font-medium">{p.player}</td>
+                  <td className="stat-score py-2 px-2 text-right text-muted" title={p.duprId ? `DUPR ID: ${p.duprId}` : ""}>
+                    {p.duprRating != null ? Number(p.duprRating).toFixed(3) : "—"}
+                  </td>
                   <td className="stat-score py-2 px-2 text-right font-semibold">{p.points}</td>
                   <td className="stat-score py-2 px-2 text-right text-emerald-700 dark:text-emerald-300">
                     {p.wins}
@@ -179,6 +183,10 @@ export default function PlayerRankings() {
           <div className="mt-3 text-xs text-muted">
             Points: Win={1}, Tie={0.5}, Loss={-0.5} (PLAYER_WIN_POINTS / PLAYER_TIE_POINTS / PLAYER_LOSS_POINTS —
             separate from Team Standings' formula)
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            DUPR ratings are entered manually in each member's Profile and matched here by display name — players
+            without an account or without a DUPR rating set show "—".
           </div>
         </Surface>
       )}

@@ -229,11 +229,41 @@ export const api = {
       body: payload,
     });
   },
+  updateTournamentLogo(tournamentId, logoDataUrl) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/logo`, {
+      method: "PUT",
+      body: { logoDataUrl },
+    });
+  },
   updatePlayerPool(tournamentId, playerPool) {
     return req(`/tournaments/${encodeURIComponent(tournamentId)}/player-pool`, {
       method: "PUT",
       body: { playerPool },
     });
+  },
+  setTeamStandingsOverride(tournamentId, teamId, payload) {
+    return req(
+      `/tournaments/${encodeURIComponent(tournamentId)}/teams/${encodeURIComponent(teamId)}/standings-override`,
+      { method: "PUT", body: payload }
+    );
+  },
+  clearTeamStandingsOverride(tournamentId, teamId) {
+    return req(
+      `/tournaments/${encodeURIComponent(tournamentId)}/teams/${encodeURIComponent(teamId)}/standings-override`,
+      { method: "PUT", body: { clear: true } }
+    );
+  },
+  generatePlayoffs(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/playoffs/generate`, { method: "POST" });
+  },
+  setPlayoffSlotMatch(tournamentId, slot, matchId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/playoffs/${encodeURIComponent(slot)}`, {
+      method: "PUT",
+      body: { matchId },
+    });
+  },
+  advancePlayoffs(tournamentId) {
+    return req(`/tournaments/${encodeURIComponent(tournamentId)}/playoffs/advance`, { method: "POST" });
   },
 
   // Player rankings

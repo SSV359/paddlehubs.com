@@ -1,9 +1,10 @@
 // /opt/paddlehubs-site/src/pages/TournamentDetails.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isLoggedIn, getUserSub, isAdmin } from "../lib/auth.js";
 import { api } from "../lib/api.js";
-import { Pill } from "../components/ui.jsx";
+import { resizeImageFile } from "../lib/image.js";
+import { Pill, CaptainBadge, PlayerAvatar, GenderBadge } from "../components/ui.jsx";
 import QRCode from "qrcode";
 
 function trim(v) {
@@ -113,6 +114,66 @@ function TeamTag({ team, className = "" }) {
   );
 }
 
+// One card in the playoff bracket — shows the two teams, lets the admin
+// link an existing recorded match to this slot, and shows the result
+// once that match has a winner.
+function PlayoffSlotCard({ title, slot, teamsById, matches, canEdit, onLink, placeholder }) {
+  const teamA = slot?.teamAId ? teamsById.get(String(slot.teamAId)) : null;
+  const teamB = slot?.teamBId ? teamsById.get(String(slot.teamBId)) : null;
+  const linkedMatch = slot?.matchId ? matches.find((m) => String(m.id) === String(slot.matchId)) : null;
+
+  // Candidate matches: same two teams as this slot, in either order.
+  const candidates = matches.filter((m) => {
+    if (!slot?.teamAId || !slot?.teamBId) return false;
+    const a = String(m.teamAId);
+    const b = String(m.teamBId);
+    return (a === String(slot.teamAId) && b === String(slot.teamBId)) || (a === String(slot.teamBId) && b === String(slot.teamAId));
+  });
+
+  return (
+    <div className="rounded-xl border border-line bg-surface2 p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+        <TeamTag team={teamA} />
+        <span className="text-muted">vs</span>
+        <TeamTag team={teamB} />
+      </div>
+
+      {!teamA || !teamB ? (
+        <div className="mt-2 text-xs text-muted">{placeholder || "Not set yet"}</div>
+      ) : (
+        <>
+          {canEdit && (
+            <select
+              value={slot?.matchId || ""}
+              onChange={(e) => onLink(e.target.value)}
+              className="mt-3 w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs"
+            >
+              <option value="">Link a recorded match…</option>
+              {candidates.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.date} · {m.court} · {m.winner ? `${m.winner} won` : "no winner yet"}
+                </option>
+              ))}
+            </select>
+          )}
+          {linkedMatch && (
+            <div className="mt-2 text-xs">
+              {linkedMatch.winnerTeamId && linkedMatch.winnerTeamId !== "TIE" ? (
+                <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  Winner: <TeamTag team={teamsById.get(String(linkedMatch.winnerTeamId))} />
+                </span>
+              ) : (
+                <span className="text-muted">Linked — no clear winner recorded yet</span>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function TournamentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -148,12 +209,19 @@ export default function TournamentDetails() {
   const [schedule, setSchedule] = useState([]); // array of weeks -> { week, date, skipped, fixtures }
 
   const [registrationsOpen, setRegistrationsOpen] = useState(true);
+  const [playoffsOpen, setPlayoffsOpen] = useState(true);
+  const logoInputRef = useRef(null);
+  const [logoUploading, setLogoUploading] = useState(false);
   const [registrations, setRegistrations] = useState([]);
   const [regLoading, setRegLoading] = useState(false);
   const [regErr, setRegErr] = useState("");
   const [showQr, setShowQr] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState("");
-  const [regWindow, setRegWindow] = useState({ registrationStartDate: "", registrationEndDate: "" });
+  const [regWindow, setRegWindow] = useState({
+    registrationStartDate: "",
+    registrationEndDate: "",
+    registrationLimit: "",
+  });
   const [playerPool, setPlayerPool] = useState([]);
   const [newPoolPlayer, setNewPoolPlayer] = useState("");
   const [savingPool, setSavingPool] = useState(false);
@@ -165,6 +233,16 @@ export default function TournamentDetails() {
   const [editingMatchId, setEditingMatchId] = useState("");
   const [editForm, setEditForm] = useState({ teamAPlayers: [], teamBPlayers: [], gamesPlayed: 1, games: [] });
   const [savingEdit, setSavingEdit] = useState(false);
+  const [editingStandingsTeamId, setEditingStandingsTeamId] = useState("");
+  const [standingsEditForm, setStandingsEditForm] = useState({
+    points: "",
+    wins: "",
+    losses: "",
+    ties: "",
+    pointsFor: "",
+    pointsAgainst: "",
+  });
+  const [savingStandingsOverride, setSavingStandingsOverride] = useState(false);
   const [matchSortAsc, setMatchSortAsc] = useState(false);
 
   const [setup, setSetup] = useState({
@@ -185,7 +263,34 @@ export default function TournamentDetails() {
     games: [{ a: 11, b: 7 }],
     gamesPlayed: 1,
     notes: "",
+    dreamBreakerA: "",
+    dreamBreakerB: "",
   });
+
+  const isMlpTournament = tournament?.format === "mlp_singles";
+
+  // Live games-won tally for the Add Match form, so we know whether to
+  // show DreamBreaker inputs (MLP format only, when games finish tied).
+  const formGamesWon = useMemo(() => {
+    const games = form.games || [];
+    let a = 0,
+      b = 0;
+    for (const g of games) {
+      const ga = Number(g.a);
+      const gb = Number(g.b);
+      if (!Number.isFinite(ga) || !Number.isFinite(gb)) continue;
+      if (ga > gb) a++;
+      else if (gb > ga) b++;
+    }
+    return { a, b };
+  }, [form.games]);
+
+  const formNeedsDreamBreaker =
+    isMlpTournament &&
+    Number(form.gamesPlayed) === (form.games || []).length &&
+    (form.games || []).length > 0 &&
+    formGamesWon.a === formGamesWon.b &&
+    (form.games || []).every((g) => trim(g.a) !== "" && trim(g.b) !== "");
 
   const teams = tournament?.teams || [];
   const teamsById = useMemo(() => new Map((teams || []).map((t) => [String(t.id), t])), [teams]);
@@ -220,6 +325,7 @@ export default function TournamentDetails() {
       setRegWindow({
         registrationStartDate: tRes?.registrationStartDate || "",
         registrationEndDate: tRes?.registrationEndDate || "",
+        registrationLimit: tRes?.registrationLimit ?? "",
       });
       setPlayerPool(Array.isArray(tRes?.playerPool) ? tRes.playerPool : []);
 
@@ -279,6 +385,7 @@ export default function TournamentDetails() {
                 name: t.name || "",
                 players: Array.isArray(t.players) ? t.players.slice() : [],
                 color: t.color || DEFAULT_TEAM_COLORS[i % DEFAULT_TEAM_COLORS.length],
+                captain: t.captain || "",
               }))
             : prev.teams.length > 0
             ? prev.teams
@@ -316,13 +423,27 @@ export default function TournamentDetails() {
   function rebuildTeams() {
     const teamCount = Number(setup.teamCount);
     const playersPerTeam = Number(setup.playersPerTeam);
-    const t = Array.from({ length: teamCount }, (_, i) => ({
-      id: "",
-      name: `Team ${i + 1}`,
-      players: Array.from({ length: playersPerTeam }, () => ""),
-      color: DEFAULT_TEAM_COLORS[i % DEFAULT_TEAM_COLORS.length],
-    }));
-    setSetup((s) => ({ ...s, teams: t }));
+
+    setSetup((s) => {
+      const existing = s.teams || [];
+      // Preserve whatever's already there for each team position — name,
+      // players, color, id — only adding new blank teams if the count
+      // went up, dropping extras if it went down, and resizing each
+      // team's player slots (padding or trimming) to match the new
+      // players-per-team count. This used to wipe everything back to
+      // "Team 1"/"Team 2"/etc. on every click, which lost real work.
+      const t = Array.from({ length: teamCount }, (_, i) => {
+        const prev = existing[i];
+        return {
+          id: prev?.id || "",
+          name: prev?.name || `Team ${i + 1}`,
+          players: resizePlayers(prev?.players || [], playersPerTeam),
+          color: prev?.color || DEFAULT_TEAM_COLORS[i % DEFAULT_TEAM_COLORS.length],
+          captain: prev?.captain || "",
+        };
+      });
+      return { ...s, teams: t };
+    });
   }
 
   function setTeamName(idx, name) {
@@ -341,6 +462,14 @@ export default function TournamentDetails() {
     });
   }
 
+  function setTeamCaptain(idx, captain) {
+    setSetup((s) => {
+      const next = (s.teams || []).slice();
+      next[idx] = { ...next[idx], captain };
+      return { ...s, teams: next };
+    });
+  }
+
   function setPlayer(idx, pIdx, value) {
     setSetup((s) => {
       const next = (s.teams || []).slice();
@@ -350,6 +479,21 @@ export default function TournamentDetails() {
       next[idx] = { ...team, players };
       return { ...s, teams: next };
     });
+  }
+
+  // Same "+ Add new player…" pattern used elsewhere — prompts for a
+  // name, adds it to the pool, and picks it immediately.
+  function handleRosterPlayerSelect(idx, pIdx, value) {
+    if (value !== "__add_new__") {
+      setPlayer(idx, pIdx, value);
+      return;
+    }
+    const name = trim(window.prompt("New player's name:") || "");
+    if (!name) return;
+    if (!playerPool.some((p) => p.toLowerCase() === name.toLowerCase())) {
+      setPlayerPool((prev) => [...prev, name].sort((a, b) => a.localeCompare(b)));
+    }
+    setPlayer(idx, pIdx, name);
   }
 
   function addPoolPlayer() {
@@ -397,6 +541,7 @@ export default function TournamentDetails() {
         name: trim(t.name),
         players: (t.players || []).map((p) => trim(p)).filter(Boolean),
         color: t.color || "",
+        captain: t.captain || "",
       })),
     };
 
@@ -468,6 +613,18 @@ export default function TournamentDetails() {
     });
   }
 
+  // Per-game player assignment — MLP format only. Each of the 4 games in
+  // a matchup has its own player pairing, unlike a normal singles/doubles
+  // match where the same player(s) play the whole thing.
+  function setGamePlayer(idx, side, value) {
+    setForm((f) => {
+      const games = resizeGames(f.games, f.gamesPlayed).slice();
+      const key = side === "A" ? "playerA" : "playerB";
+      games[idx] = { ...games[idx], [key]: value };
+      return { ...f, games };
+    });
+  }
+
   function setMatchPlayer(side, idx, value) {
     setForm((f) => {
       const key = side === "A" ? "teamAPlayers" : "teamBPlayers";
@@ -475,6 +632,21 @@ export default function TournamentDetails() {
       arr[idx] = value;
       return { ...f, [key]: arr };
     });
+  }
+
+  // Same "+ Add new player…" pattern as the schedule fixture pickers —
+  // prompts for a name, adds it to the pool, and picks it immediately.
+  function handleMatchPlayerSelect(side, idx, value) {
+    if (value !== "__add_new__") {
+      setMatchPlayer(side, idx, value);
+      return;
+    }
+    const name = trim(window.prompt("New player's name:") || "");
+    if (!name) return;
+    if (!playerPool.some((p) => p.toLowerCase() === name.toLowerCase())) {
+      setPlayerPool((prev) => [...prev, name].sort((a, b) => a.localeCompare(b)));
+    }
+    setMatchPlayer(side, idx, name);
   }
 
   const matchupPreview = useMemo(() => {
@@ -637,8 +809,21 @@ export default function TournamentDetails() {
     if (games.some((g) => !Number.isFinite(g.a) || !Number.isFinite(g.b) || g.a < 0 || g.b < 0)) {
       return setErr(`Enter a score for both teams in all ${fx.gamesPlayed} game${fx.gamesPlayed > 1 ? "s" : ""}.`);
     }
-    if (!fx.teamAPlayers?.length || !fx.teamBPlayers?.length) {
-      return setErr("Pick players for both teams on this fixture before recording a score.");
+
+    const perSide = fx.gameType === "singles" ? 1 : 2;
+    const teamAPlayers = (fx.teamAPlayers || []).map((p) => trim(p)).filter(Boolean);
+    const teamBPlayers = (fx.teamBPlayers || []).map((p) => trim(p)).filter(Boolean);
+    const label = fx.gameType === "singles" ? "Singles" : "Doubles";
+
+    const aOk = teamAPlayers.length === 0 || teamAPlayers.length === perSide;
+    const bOk = teamBPlayers.length === 0 || teamBPlayers.length === perSide;
+    if (!aOk || !bOk) {
+      return setErr(
+        `${label} matches need either no players selected, or exactly ${perSide} player${perSide > 1 ? "s" : ""} per team — not a partial pick.`
+      );
+    }
+    if (new Set(teamAPlayers).size !== teamAPlayers.length || new Set(teamBPlayers).size !== teamBPlayers.length) {
+      return setErr("Each player can only be picked once per team for this match.");
     }
 
     const payload = {
@@ -647,8 +832,8 @@ export default function TournamentDetails() {
       gameType: fx.gameType,
       teamAId: fx.teamAId,
       teamBId: fx.teamBId,
-      teamAPlayers: fx.teamAPlayers,
-      teamBPlayers: fx.teamBPlayers,
+      teamAPlayers,
+      teamBPlayers,
       gamesPlayed: fx.gamesPlayed,
       games,
     };
@@ -769,20 +954,6 @@ export default function TournamentDetails() {
       const res = await api.saveTournamentSchedule(id, payload);
       setSchedule(Array.isArray(res?.weeks) ? res.weeks : schedule);
 
-      // Backend also merges these into the saved pool — mirror that
-      // locally so the dropdowns/datalist reflect it immediately.
-      const usedNames = payload.weeks.flatMap((w) => w.fixtures.flatMap((f) => [...f.teamAPlayers, ...f.teamBPlayers]));
-      if (usedNames.length) {
-        setPlayerPool((prev) => {
-          const seen = new Map(prev.map((n) => [n.toLowerCase(), n]));
-          for (const n of usedNames) {
-            const key = n.toLowerCase();
-            if (!seen.has(key)) seen.set(key, n);
-          }
-          return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
-        });
-      }
-
       setMsg("Schedule saved ✅");
     } catch (e) {
       setErr(String(e?.message || e));
@@ -869,9 +1040,11 @@ export default function TournamentDetails() {
     const teamBPlayers = (form.teamBPlayers || []).map((p) => trim(p)).filter(Boolean);
     const label = form.gameType === "singles" ? "Singles" : "Doubles";
 
-    if (teamAPlayers.length !== requiredPerSide || teamBPlayers.length !== requiredPerSide) {
+    const aOk = teamAPlayers.length === 0 || teamAPlayers.length === requiredPerSide;
+    const bOk = teamBPlayers.length === 0 || teamBPlayers.length === requiredPerSide;
+    if (!aOk || !bOk) {
       return setErr(
-        `${label} matches need exactly ${requiredPerSide} player${requiredPerSide > 1 ? "s" : ""} picked for each team.`
+        `${label} matches need either no players selected, or exactly ${requiredPerSide} player${requiredPerSide > 1 ? "s" : ""} per team — not a partial pick.`
       );
     }
     if (new Set(teamAPlayers).size !== teamAPlayers.length || new Set(teamBPlayers).size !== teamBPlayers.length) {
@@ -887,10 +1060,33 @@ export default function TournamentDetails() {
     if (rawFormGames.some((g) => trim(g.a) === "" || trim(g.b) === "")) {
       return setErr(`Enter a score for both teams in all ${gamesPlayed} game${gamesPlayed > 1 ? "s" : ""}.`);
     }
-    const games = rawFormGames.map((g) => ({ a: Number(g.a), b: Number(g.b) }));
+    const games = rawFormGames.map((g) => ({
+      a: Number(g.a),
+      b: Number(g.b),
+      ...(g.playerA || g.playerB ? { playerA: trim(g.playerA), playerB: trim(g.playerB) } : {}),
+    }));
 
     if (games.some((g) => !Number.isFinite(g.a) || !Number.isFinite(g.b) || g.a < 0 || g.b < 0)) {
       return setErr(`Enter a score for both teams in all ${gamesPlayed} game${gamesPlayed > 1 ? "s" : ""}.`);
+    }
+
+    const gamesWonA = games.filter((g) => g.a > g.b).length;
+    const gamesWonB = games.filter((g) => g.b > g.a).length;
+
+    let dreamBreaker = null;
+    if (isMlpTournament && gamesWonA === gamesWonB) {
+      const dbA = Number(form.dreamBreakerA);
+      const dbB = Number(form.dreamBreakerB);
+      if (trim(form.dreamBreakerA) === "" || trim(form.dreamBreakerB) === "") {
+        return setErr("Games finished tied — enter the DreamBreaker score to decide the match.");
+      }
+      if (!Number.isFinite(dbA) || !Number.isFinite(dbB) || dbA < 0 || dbB < 0) {
+        return setErr("DreamBreaker score must be a valid, non-negative number for both teams.");
+      }
+      if (dbA === dbB) {
+        return setErr("DreamBreaker can't end in a tie — someone has to win it.");
+      }
+      dreamBreaker = { played: true, scoreA: dbA, scoreB: dbB };
     }
 
     const payload = {
@@ -905,6 +1101,7 @@ export default function TournamentDetails() {
       games,
       gamesPlayed,
       notes: trim(form.notes),
+      ...(dreamBreaker ? { dreamBreaker } : {}),
     };
 
     setLoading(true);
@@ -931,6 +1128,8 @@ export default function TournamentDetails() {
         games: [{ a: 11, b: 7 }],
         gamesPlayed: 1,
         notes: "",
+        dreamBreakerA: "",
+        dreamBreakerB: "",
       }));
     } catch (e2) {
       setErr(String(e2?.message || e2));
@@ -956,6 +1155,43 @@ export default function TournamentDetails() {
       setErr(String(e?.message || e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onLogoChosen(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !canEditTournament) return;
+    if (!file.type.startsWith("image/")) return setErr("Please choose an image file.");
+
+    setErr("");
+    setMsg("");
+    setLogoUploading(true);
+    try {
+      const dataUrl = await resizeImageFile(file, 240, 0.8);
+      const res = await api.updateTournamentLogo(id, dataUrl);
+      setTournament((t) => (t ? { ...t, logoDataUrl: res.logoDataUrl } : t));
+      setMsg("Logo updated ✅");
+    } catch (e2) {
+      setErr(String(e2?.message || e2));
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function removeLogo() {
+    if (!canEditTournament) return;
+    setErr("");
+    setMsg("");
+    setLogoUploading(true);
+    try {
+      await api.updateTournamentLogo(id, "");
+      setTournament((t) => (t ? { ...t, logoDataUrl: "" } : t));
+      setMsg("Logo removed ✅");
+    } catch (e2) {
+      setErr(String(e2?.message || e2));
+    } finally {
+      setLogoUploading(false);
     }
   }
 
@@ -1156,11 +1392,13 @@ export default function TournamentDetails() {
     const perSide = match.gameType === "singles" ? 1 : 2;
     const players = editForm.teamAPlayers.map((p) => trim(p)).filter(Boolean);
     const playersB = editForm.teamBPlayers.map((p) => trim(p)).filter(Boolean);
-    if (players.length !== perSide || playersB.length !== perSide) {
+    const aOk = players.length === 0 || players.length === perSide;
+    const bOk = playersB.length === 0 || playersB.length === perSide;
+    if (!aOk || !bOk) {
       return setErr(
-        `${match.gameType === "singles" ? "Singles" : "Doubles"} matches need exactly ${perSide} player${
+        `${match.gameType === "singles" ? "Singles" : "Doubles"} matches need either no players selected, or exactly ${perSide} player${
           perSide > 1 ? "s" : ""
-        } per team.`
+        } per team — not a partial pick.`
       );
     }
     if (editForm.games.some((g) => trim(g.a) === "" || trim(g.b) === "")) {
@@ -1202,6 +1440,119 @@ export default function TournamentDetails() {
     }
   }
 
+  // Manual standings correction — a last-resort override when match
+  // data can't be trusted to produce the right number (e.g. legitimate
+  // matches were accidentally cleared and the real historical totals
+  // are known even though the underlying match records aren't
+  // recoverable). Takes precedence over computed values for that team
+  // until reset.
+  function startEditStandings(row) {
+    setEditingStandingsTeamId(row.teamId);
+    setStandingsEditForm({
+      points: row.points ?? "",
+      wins: row.wins ?? "",
+      losses: row.losses ?? "",
+      ties: row.ties ?? "",
+      pointsFor: row.pointsFor ?? "",
+      pointsAgainst: row.pointsAgainst ?? "",
+    });
+  }
+
+  function cancelEditStandings() {
+    setEditingStandingsTeamId("");
+  }
+
+  function onStandingsEditChange(e) {
+    const { name, value } = e.target;
+    setStandingsEditForm((f) => ({ ...f, [name]: value }));
+  }
+
+  async function saveStandingsOverride(teamId) {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can override standings.");
+    setErr("");
+    setMsg("");
+    setSavingStandingsOverride(true);
+    try {
+      await api.setTeamStandingsOverride(id, teamId, standingsEditForm);
+      const sRes = await api.getTournamentStandings(id);
+      setStandings(sRes?.standings || []);
+      setEditingStandingsTeamId("");
+      setMsg("Standings updated ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSavingStandingsOverride(false);
+    }
+  }
+
+  async function resetStandingsOverride(teamId) {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can override standings.");
+    const ok = confirm("Reset this team back to computed standings (removes the manual override)?");
+    if (!ok) return;
+
+    setErr("");
+    setMsg("");
+    setSavingStandingsOverride(true);
+    try {
+      await api.clearTeamStandingsOverride(id, teamId);
+      const sRes = await api.getTournamentStandings(id);
+      setStandings(sRes?.standings || []);
+      setEditingStandingsTeamId("");
+      setMsg("Reset to computed standings ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSavingStandingsOverride(false);
+    }
+  }
+
+  async function handleGeneratePlayoffs() {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can generate the playoff bracket.");
+    const ok = confirm("Generate the playoff bracket from current standings (top 4 seeds)?");
+    if (!ok) return;
+
+    setErr("");
+    setMsg("");
+    setLoading(true);
+    try {
+      const res = await api.generatePlayoffs(id);
+      setTournament((t) => (t ? { ...t, playoffs: res.playoffs } : t));
+      setMsg("Playoff bracket generated ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function linkPlayoffSlotMatch(slot, matchId) {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can edit the bracket.");
+    setErr("");
+    setMsg("");
+    try {
+      const res = await api.setPlayoffSlotMatch(id, slot, matchId);
+      setTournament((t) => (t ? { ...t, playoffs: res.playoffs } : t));
+    } catch (e) {
+      setErr(String(e?.message || e));
+    }
+  }
+
+  async function handleAdvancePlayoffs() {
+    if (!canEditTournament) return setErr("Only tournament owner/admin can advance the bracket.");
+    setErr("");
+    setMsg("");
+    setLoading(true);
+    try {
+      const res = await api.advancePlayoffs(id);
+      setTournament((t) => (t ? { ...t, playoffs: res.playoffs } : t));
+      setMsg("Advanced to championship / third place ✅");
+    } catch (e) {
+      setErr(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const sortedMatches = useMemo(() => {
     const q = trim(matchQuery).toLowerCase();
 
@@ -1239,20 +1590,63 @@ export default function TournamentDetails() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-line border-l-4 border-l-signature bg-surface p-6">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-2xl font-semibold">{tournament?.name || "Tournament"}</div>
-            <div className="text-sm text-muted mt-1">
-              {tournament?.startDate || "—"} → {tournament?.endDate || "—"} •{" "}
-              <span className="font-semibold">{String(tournament?.status || "ACTIVE")}</span>
-              {admin ? (
-                <span className="ml-2 inline-flex items-center rounded-full border border-line bg-surface2 px-2 py-0.5 text-[11px]">
-                  Admin
-                </span>
+          <div className="flex items-start gap-4">
+            {tournament?.logoDataUrl ? (
+              <img
+                src={tournament.logoDataUrl}
+                alt=""
+                className="h-14 w-14 shrink-0 rounded-xl border border-line object-cover"
+              />
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-dashed border-line text-lg font-bold text-muted">
+                {(tournament?.name || "?")[0]?.toUpperCase()}
+              </div>
+            )}
+            <div>
+              <div className="text-2xl font-semibold">
+                {tournament?.name || "Tournament"}
+                {isMlpTournament && (
+                  <span className="ml-2 align-middle rounded-full border border-line bg-surface2 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted">
+                    MLP Singles
+                  </span>
+                )}
+              </div>
+              {canEditTournament && (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-[11px] font-medium transition hover:bg-line disabled:opacity-40"
+                  >
+                    {logoUploading ? "Saving…" : tournament?.logoDataUrl ? "Change Logo" : "Add Logo"}
+                  </button>
+                  {tournament?.logoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={removeLogo}
+                      disabled={logoUploading}
+                      className="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-[11px] font-medium transition hover:bg-line disabled:opacity-40"
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <input ref={logoInputRef} type="file" accept="image/*" onChange={onLogoChosen} className="hidden" />
+                </div>
+              )}
+              <div className="text-sm text-muted mt-1">
+                {tournament?.startDate || "—"} → {tournament?.endDate || "—"} •{" "}
+                <span className="font-semibold">{String(tournament?.status || "ACTIVE")}</span>
+                {admin ? (
+                  <span className="ml-2 inline-flex items-center rounded-full border border-line bg-surface2 px-2 py-0.5 text-[11px]">
+                    Admin
+                  </span>
+                ) : null}
+              </div>
+              {tournament?.ownerDisplayName ? (
+                <div className="text-xs text-muted mt-1">Created by: {tournament.ownerDisplayName}</div>
               ) : null}
             </div>
-            {tournament?.ownerDisplayName ? (
-              <div className="text-xs text-muted mt-1">Created by: {tournament.ownerDisplayName}</div>
-            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -1358,9 +1752,19 @@ export default function TournamentDetails() {
                   <div className="mt-4 rounded-xl border border-line bg-surface2 p-4">
                     <div className="text-sm font-semibold">Registration Window</div>
                     <div className="mt-1 text-xs text-muted">
-                      The public form only accepts sign-ups between these dates.
+                      The public form only accepts sign-ups between these dates
+                      {regWindow.registrationLimit ? ", and stops once the limit below is reached" : ""}.
                     </div>
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="mt-3 flex flex-wrap items-baseline gap-2">
+                      <span className="stat-score text-2xl font-bold">{registrations.length}</span>
+                      <span className="text-xs text-muted">
+                        {regWindow.registrationLimit ? `of ${regWindow.registrationLimit} registered` : "registered"}
+                      </span>
+                      {regWindow.registrationLimit && registrations.length >= Number(regWindow.registrationLimit) && (
+                        <Pill tone="danger">Full</Pill>
+                      )}
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                       <div>
                         <label className="text-xs text-muted">Opens</label>
                         <input
@@ -1379,6 +1783,19 @@ export default function TournamentDetails() {
                           name="registrationEndDate"
                           value={regWindow.registrationEndDate}
                           onChange={onRegWindowChange}
+                          disabled={!canEditTournament || savingRegWindow}
+                          className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm disabled:opacity-60"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted">Limit (blank = unlimited)</label>
+                        <input
+                          type="number"
+                          name="registrationLimit"
+                          min={0}
+                          value={regWindow.registrationLimit}
+                          onChange={onRegWindowChange}
+                          placeholder="Unlimited"
                           disabled={!canEditTournament || savingRegWindow}
                           className="mt-2 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm disabled:opacity-60"
                         />
@@ -1527,7 +1944,7 @@ export default function TournamentDetails() {
               <div className="text-sm font-semibold">Player Pool</div>
               <div className="mt-1 text-xs text-muted">
                 Add players here once and reuse them on any team or schedule fixture — no need to retype names.
-                Names used on a roster or in the schedule are added here automatically too.
+                Anyone who registers via the registration link is added here automatically too.
               </div>
 
               {canEditTournament && (
@@ -1590,13 +2007,6 @@ export default function TournamentDetails() {
               </div>
             </div>
 
-            {/* Autocomplete suggestions for roster/fixture player inputs, sourced from the pool above */}
-            <datalist id="player-pool-list">
-              {playerPool.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-
             {/* Roster table: one row per team, one column per player slot */}
             <div className="mt-4 overflow-x-auto rounded-xl border border-line">
               <table className="w-full min-w-[480px] text-sm">
@@ -1633,18 +2043,64 @@ export default function TournamentDetails() {
                           disabled={loading || !canEditTournament}
                         />
                       </td>
-                      {(t.players || []).map((p, pIdx) => (
-                        <td key={pIdx} className="px-3 py-2.5">
-                          <input
-                            value={p}
-                            onChange={(e) => setPlayer(idx, pIdx, e.target.value)}
-                            placeholder={`Player ${pIdx + 1}`}
-                            list="player-pool-list"
-                            className="w-full min-w-[130px] rounded-lg border border-line bg-surface2 px-2.5 py-1.5"
-                            disabled={loading || !canEditTournament}
-                          />
-                        </td>
-                      ))}
+                      {(t.players || []).map((p, pIdx) => {
+                        const registeredNames = registrations.map((r) => r.name).filter(Boolean);
+                        const poolExtras = playerPool.filter(
+                          (pl) => !registeredNames.some((rn) => rn.toLowerCase() === pl.toLowerCase())
+                        );
+                        return (
+                          <td key={pIdx} className="px-3 py-2.5">
+                            <select
+                              value={p}
+                              onChange={(e) => handleRosterPlayerSelect(idx, pIdx, e.target.value)}
+                              className="w-full min-w-[150px] rounded-lg border border-line bg-surface2 px-2.5 py-1.5"
+                              disabled={loading || !canEditTournament}
+                            >
+                              <option value="">Player {pIdx + 1}</option>
+                              {p && !registeredNames.includes(p) && !playerPool.includes(p) && (
+                                <option value={p}>{p} (current)</option>
+                              )}
+                              {registeredNames.length > 0 && (
+                                <optgroup label="Registered players">
+                                  {registeredNames.map((name) => (
+                                    <option key={name} value={name}>
+                                      {name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {poolExtras.length > 0 && (
+                                <optgroup label="Player pool">
+                                  {poolExtras.map((name) => (
+                                    <option key={name} value={name}>
+                                      {name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <option value="__add_new__">+ Add new player…</option>
+                            </select>
+                            {p && (
+                              <button
+                                type="button"
+                                onClick={() => setTeamCaptain(idx, t.captain === p ? "" : p)}
+                                disabled={loading || !canEditTournament}
+                                className={classNames(
+                                  "mt-1 flex items-center gap-1 text-[10px] disabled:opacity-50",
+                                  t.captain === p ? "font-semibold text-ink" : "text-muted hover:text-ink"
+                                )}
+                              >
+                                {t.captain === p ? (
+                                  <CaptainBadge size={14} />
+                                ) : (
+                                  <span className="inline-block h-3.5 w-3.5 rounded-full border border-line" />
+                                )}
+                                {t.captain === p ? "Captain" : "Make captain"}
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                   {(setup.teams || []).length === 0 && (
@@ -1704,13 +2160,14 @@ export default function TournamentDetails() {
                       <th className="py-2.5 pr-1 text-right">L</th>
                       <th className="py-2.5 pr-1 text-right">T</th>
                       <th className="py-2.5 pr-1 text-right">PF</th>
-                      <th className="py-2.5 pr-3 text-right">PA</th>
+                      <th className="py-2.5 pr-1 text-right">PA</th>
+                      <th className="py-2.5 pr-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {standings.map((r) => (
+                      <React.Fragment key={r.teamId}>
                       <tr
-                        key={r.teamId}
                         className={classNames(
                           "border-t border-line",
                           r.rank <= 3 && "border-l-4 border-l-signature bg-surface2"
@@ -1730,9 +2187,19 @@ export default function TournamentDetails() {
                               style={{ backgroundColor: r.color || "#888" }}
                             />
                             {r.teamName}
+                            {r.overridden && <Pill tone="signature">Manual</Pill>}
                           </div>
                           {(r.players || []).length ? (
-                            <div className="text-[11px] text-muted">{r.players.join(", ")}</div>
+                            <div className="flex flex-wrap items-center gap-x-1 text-[11px] text-muted">
+                              {r.players.map((p, i) => (
+                                <span key={p} className="inline-flex items-center gap-0.5">
+                                  {p === r.captain && <CaptainBadge size={12} />}
+                                  {p}
+                                  <GenderBadge gender={r.playerGenders?.[p]} size={11} />
+                                  {i < r.players.length - 1 ? "," : ""}
+                                </span>
+                              ))}
+                            </div>
                           ) : null}
                         </td>
                         <td className="stat-score py-2.5 pr-1 text-right font-semibold">{r.points}</td>
@@ -1745,7 +2212,81 @@ export default function TournamentDetails() {
                         <td className="stat-score py-2.5 pr-1 text-right text-muted">{r.ties}</td>
                         <td className="stat-score py-2.5 pr-1 text-right text-muted">{r.pointsFor}</td>
                         <td className="stat-score py-2.5 pr-3 text-right text-muted">{r.pointsAgainst}</td>
+                        <td className="whitespace-nowrap py-2.5 pr-3 text-right">
+                          {canEditTournament && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                editingStandingsTeamId === r.teamId ? cancelEditStandings() : startEditStandings(r)
+                              }
+                              className="rounded-lg border border-line bg-surface2 px-2 py-1 text-[11px] font-medium transition hover:bg-line"
+                            >
+                              {editingStandingsTeamId === r.teamId ? "Cancel" : "Edit"}
+                            </button>
+                          )}
+                        </td>
                       </tr>
+
+                      {editingStandingsTeamId === r.teamId && (
+                        <tr className="border-t border-line bg-surface2">
+                          <td colSpan={9} className="p-4">
+                            <div className="space-y-3">
+                              <div className="text-xs text-muted">
+                                Manually set this team's standings — takes over from the computed values until reset.
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
+                                {[
+                                  ["points", "Points"],
+                                  ["wins", "W"],
+                                  ["losses", "L"],
+                                  ["ties", "T"],
+                                  ["pointsFor", "PF"],
+                                  ["pointsAgainst", "PA"],
+                                ].map(([key, label]) => (
+                                  <div key={key}>
+                                    <label className="text-xs text-muted">{label}</label>
+                                    <input
+                                      type="number"
+                                      name={key}
+                                      value={standingsEditForm[key]}
+                                      onChange={onStandingsEditChange}
+                                      className="mt-1 w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => saveStandingsOverride(r.teamId)}
+                                  disabled={savingStandingsOverride}
+                                  className="rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
+                                >
+                                  {savingStandingsOverride ? "Saving..." : "Save Override"}
+                                </button>
+                                {r.overridden && (
+                                  <button
+                                    type="button"
+                                    onClick={() => resetStandingsOverride(r.teamId)}
+                                    disabled={savingStandingsOverride}
+                                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 transition hover:bg-red-500/15 disabled:opacity-40 dark:text-red-300"
+                                  >
+                                    Reset to Computed
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={cancelEditStandings}
+                                  className="rounded-xl border border-line bg-surface px-3 py-2 text-xs font-medium transition hover:bg-line"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -1753,8 +2294,115 @@ export default function TournamentDetails() {
             )}
 
             <div className="mt-3 text-xs text-muted">
-              Points: Win={1}, Tie={0.5}, Loss={0} (TEAM_WIN_POINTS / TEAM_TIE_POINTS / TEAM_LOSS_POINTS)
+              {isMlpTournament ? (
+                <>
+                  Points: Regulation Win={tournament?.mlpScoring?.regWin ?? 3}, DreamBreaker Win=
+                  {tournament?.mlpScoring?.dbWin ?? 2}, DreamBreaker Loss={tournament?.mlpScoring?.dbLoss ?? 1},
+                  Regulation Loss={tournament?.mlpScoring?.regLoss ?? 0} (MLP format)
+                </>
+              ) : (
+                <>Points: Win={1}, Tie={0.5}, Loss={0} (TEAM_WIN_POINTS / TEAM_TIE_POINTS / TEAM_LOSS_POINTS)</>
+              )}
             </div>
+              </>
+            )}
+          </div>
+
+          {/* Playoffs — top-4 bracket (semifinals -> championship + optional 3rd place) */}
+          <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+            <SectionHeader
+              title="Playoffs"
+              open={playoffsOpen}
+              onToggle={() => setPlayoffsOpen((v) => !v)}
+              count={tournament?.playoffs ? 4 : null}
+            />
+
+            {playoffsOpen && (
+              <>
+                {!tournament?.playoffs ? (
+                  <div className="mt-4">
+                    <div className="text-sm text-muted">
+                      Generate a top-4 bracket from current standings — Seed 1 vs Seed 4, Seed 2 vs Seed 3.
+                    </div>
+                    {canEditTournament && (
+                      <button
+                        type="button"
+                        onClick={handleGeneratePlayoffs}
+                        disabled={loading || standings.length < 4}
+                        className="mt-3 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-ink transition hover:opacity-90 disabled:opacity-40"
+                      >
+                        Generate Bracket
+                      </button>
+                    )}
+                    {standings.length < 4 && (
+                      <div className="mt-2 text-xs text-muted">Need at least 4 teams with standings first.</div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <PlayoffSlotCard
+                        title="Semifinal 1 (Seed 1 vs Seed 4)"
+                        slot={tournament.playoffs.semifinal1}
+                        teamsById={teamsById}
+                        matches={matches}
+                        canEdit={canEditTournament}
+                        onLink={(matchId) => linkPlayoffSlotMatch("semifinal1", matchId)}
+                      />
+                      <PlayoffSlotCard
+                        title="Semifinal 2 (Seed 2 vs Seed 3)"
+                        slot={tournament.playoffs.semifinal2}
+                        teamsById={teamsById}
+                        matches={matches}
+                        canEdit={canEditTournament}
+                        onLink={(matchId) => linkPlayoffSlotMatch("semifinal2", matchId)}
+                      />
+                    </div>
+
+                    {canEditTournament && (
+                      <button
+                        type="button"
+                        onClick={handleAdvancePlayoffs}
+                        disabled={loading}
+                        className="rounded-xl border border-line bg-surface2 px-4 py-2 text-sm font-medium transition hover:bg-line disabled:opacity-40"
+                      >
+                        Advance to Championship / 3rd Place
+                      </button>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <PlayoffSlotCard
+                        title="Championship"
+                        slot={tournament.playoffs.championship}
+                        teamsById={teamsById}
+                        matches={matches}
+                        canEdit={canEditTournament}
+                        onLink={(matchId) => linkPlayoffSlotMatch("championship", matchId)}
+                        placeholder="Advance semifinals first"
+                      />
+                      <PlayoffSlotCard
+                        title="Third Place (optional)"
+                        slot={tournament.playoffs.thirdPlace}
+                        teamsById={teamsById}
+                        matches={matches}
+                        canEdit={canEditTournament}
+                        onLink={(matchId) => linkPlayoffSlotMatch("thirdPlace", matchId)}
+                        placeholder="Advance semifinals first"
+                      />
+                    </div>
+
+                    {canEditTournament && (
+                      <button
+                        type="button"
+                        onClick={handleGeneratePlayoffs}
+                        disabled={loading}
+                        className="text-xs text-muted underline underline-offset-2 hover:text-ink"
+                      >
+                        Regenerate bracket from current standings
+                      </button>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2305,7 +2953,9 @@ export default function TournamentDetails() {
                   {matchupPreview}
                 </div>
 
-                {/* Player pickers — required, sourced from each team's saved roster */}
+                {/* Player pickers — optional. Leave blank to record just a team
+                    score with no per-player tracking, or pick exactly the
+                    right number to also track individual player stats. */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
                     <div className="text-xs uppercase tracking-wide text-muted">
@@ -2313,26 +2963,41 @@ export default function TournamentDetails() {
                     </div>
                     {Array.from({ length: requiredPerSide }).map((_, idx) => {
                       const roster = teamsById.get(String(form.teamAId))?.players || [];
+                      const poolExtras = playerPool.filter((p) => !roster.includes(p));
                       return (
                         <select
                           key={idx}
                           value={form.teamAPlayers?.[idx] || ""}
-                          onChange={(e) => setMatchPlayer("A", idx, e.target.value)}
+                          onChange={(e) => handleMatchPlayerSelect("A", idx, e.target.value)}
                           className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
                           disabled={loading || !form.teamAId}
                         >
-                          <option value="">{roster.length ? `Player ${idx + 1}` : "No roster saved"}</option>
-                          {roster.map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
+                          <option value="">{roster.length ? `Player ${idx + 1}` : "Player " + (idx + 1)}</option>
+                          {roster.length > 0 && (
+                            <optgroup label="Team roster">
+                              {roster.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {poolExtras.length > 0 && (
+                            <optgroup label="Other pool players">
+                              {poolExtras.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <option value="__add_new__">+ Add new player…</option>
                         </select>
                       );
                     })}
                     {form.teamAId && !(teamsById.get(String(form.teamAId))?.players || []).length && (
                       <div className="text-[11px] text-muted">
-                        This team has no saved roster yet — add players above and save teams first.
+                        No saved roster for this team — pick from the player pool or use "+ Add new player…" below.
                       </div>
                     )}
                   </div>
@@ -2343,26 +3008,41 @@ export default function TournamentDetails() {
                     </div>
                     {Array.from({ length: requiredPerSide }).map((_, idx) => {
                       const roster = teamsById.get(String(form.teamBId))?.players || [];
+                      const poolExtras = playerPool.filter((p) => !roster.includes(p));
                       return (
                         <select
                           key={idx}
                           value={form.teamBPlayers?.[idx] || ""}
-                          onChange={(e) => setMatchPlayer("B", idx, e.target.value)}
+                          onChange={(e) => handleMatchPlayerSelect("B", idx, e.target.value)}
                           className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
                           disabled={loading || !form.teamBId}
                         >
-                          <option value="">{roster.length ? `Player ${idx + 1}` : "No roster saved"}</option>
-                          {roster.map((p) => (
-                            <option key={p} value={p}>
-                              {p}
-                            </option>
-                          ))}
+                          <option value="">Player {idx + 1}</option>
+                          {roster.length > 0 && (
+                            <optgroup label="Team roster">
+                              {roster.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {poolExtras.length > 0 && (
+                            <optgroup label="Other pool players">
+                              {poolExtras.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <option value="__add_new__">+ Add new player…</option>
                         </select>
                       );
                     })}
                     {form.teamBId && !(teamsById.get(String(form.teamBId))?.players || []).length && (
                       <div className="text-[11px] text-muted">
-                        This team has no saved roster yet — add players above and save teams first.
+                        No saved roster for this team — pick from the player pool or use "+ Add new player…" below.
                       </div>
                     )}
                   </div>
@@ -2393,27 +3073,113 @@ export default function TournamentDetails() {
                   </div>
                   {Array.from({ length: form.gamesPlayed }).map((_, idx) => {
                     const g = form.games?.[idx] || { a: "", b: "" };
+                    const rosterA = teamsById.get(String(form.teamAId))?.players || [];
+                    const rosterB = teamsById.get(String(form.teamBId))?.players || [];
                     return (
-                      <div key={idx} className="grid grid-cols-[3.5rem_1fr_1fr] items-center gap-3">
-                        <span className="text-xs text-muted">Game {idx + 1}</span>
-                        <input
-                          type="number"
-                          value={g.a}
-                          onChange={(e) => setGameScore(idx, "a", e.target.value)}
-                          className="rounded-xl border border-line bg-surface px-3 py-2"
-                          disabled={loading}
-                        />
-                        <input
-                          type="number"
-                          value={g.b}
-                          onChange={(e) => setGameScore(idx, "b", e.target.value)}
-                          className="rounded-xl border border-line bg-surface px-3 py-2"
-                          disabled={loading}
-                        />
+                      <div key={idx} className="space-y-1.5 rounded-lg border border-line/60 p-2">
+                        <div className="grid grid-cols-[3.5rem_1fr_1fr] items-center gap-3">
+                          <span className="text-xs text-muted">Game {idx + 1}</span>
+                          <input
+                            type="number"
+                            value={g.a}
+                            onChange={(e) => setGameScore(idx, "a", e.target.value)}
+                            className="rounded-xl border border-line bg-surface px-3 py-2"
+                            disabled={loading}
+                          />
+                          <input
+                            type="number"
+                            value={g.b}
+                            onChange={(e) => setGameScore(idx, "b", e.target.value)}
+                            className="rounded-xl border border-line bg-surface px-3 py-2"
+                            disabled={loading}
+                          />
+                        </div>
+                        {isMlpTournament && (
+                          <div className="grid grid-cols-[3.5rem_1fr_1fr] items-center gap-3">
+                            <span className="text-[10px] text-muted">Player</span>
+                            <select
+                              value={g.playerA || ""}
+                              onChange={(e) => setGamePlayer(idx, "A", e.target.value)}
+                              className="rounded-lg border border-line bg-surface2 px-2 py-1 text-xs"
+                              disabled={loading}
+                            >
+                              <option value="">This game's player…</option>
+                              {rosterA.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                              {playerPool
+                                .filter((p) => !rosterA.includes(p))
+                                .map((p) => (
+                                  <option key={p} value={p}>
+                                    {p}
+                                  </option>
+                                ))}
+                            </select>
+                            <select
+                              value={g.playerB || ""}
+                              onChange={(e) => setGamePlayer(idx, "B", e.target.value)}
+                              className="rounded-lg border border-line bg-surface2 px-2 py-1 text-xs"
+                              disabled={loading}
+                            >
+                              <option value="">This game's player…</option>
+                              {rosterB.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
+                              {playerPool
+                                .filter((p) => !rosterB.includes(p))
+                                .map((p) => (
+                                  <option key={p} value={p}>
+                                    {p}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
+                  {isMlpTournament && (
+                    <div className="text-[11px] text-muted">
+                      Each game's own player is optional — set these to get accurate individual Player Rankings for
+                      MLP matchups (4 different players, 4 different games). Leave blank to skip per-player tracking
+                      for this match.
+                    </div>
+                  )}
                 </div>
+
+                {formNeedsDreamBreaker && (
+                  <div className="rounded-xl border border-signature/40 bg-signature/10 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide">
+                      Games tied {formGamesWon.a}-{formGamesWon.b} — DreamBreaker required
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted">Rally scoring to 11, win by 1. Enter the final score.</div>
+                    <div className="mt-2 grid grid-cols-[3.5rem_1fr_1fr] items-center gap-3">
+                      <span className="text-xs text-muted">Score</span>
+                      <input
+                        type="number"
+                        name="dreamBreakerA"
+                        value={form.dreamBreakerA}
+                        onChange={onFormChange}
+                        placeholder={teamsById.get(String(form.teamAId))?.name || "Team A"}
+                        className="rounded-xl border border-line bg-surface px-3 py-2"
+                        disabled={loading}
+                      />
+                      <input
+                        type="number"
+                        name="dreamBreakerB"
+                        value={form.dreamBreakerB}
+                        onChange={onFormChange}
+                        placeholder={teamsById.get(String(form.teamBId))?.name || "Team B"}
+                        className="rounded-xl border border-line bg-surface px-3 py-2"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <select
                   name="winnerTeamId"
@@ -2513,6 +3279,8 @@ export default function TournamentDetails() {
                         <td className="whitespace-nowrap py-2.5 font-semibold">
                           {m.winnerTeamId && m.winnerTeamId !== "TIE" ? (
                             <TeamTag team={teamsById.get(String(m.winnerTeamId))} />
+                          ) : !m.winnerTeamId ? (
+                            <Pill tone="danger">Cleared</Pill>
                           ) : (
                             m.winner || "—"
                           )}

@@ -1,7 +1,7 @@
 // /opt/paddlehubs-site/src/pages/TournamentRegister.jsx
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, X } from "lucide-react";
 import { api } from "../lib/api.js";
 import { Surface, PageHeading } from "../components/ui.jsx";
 
@@ -16,13 +16,19 @@ export default function TournamentRegister() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [err, setErr] = useState("");
+  const [showFullPopup, setShowFullPopup] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const t = await api.getTournamentPublicInfo(id);
-        if (!cancelled) setTournament(t);
+        if (!cancelled) {
+          setTournament(t);
+          if (t?.registrationLimit && t.registrationCount >= t.registrationLimit) {
+            setShowFullPopup(true);
+          }
+        }
       } catch (e) {
         if (!cancelled) setLoadErr(String(e?.message || e));
       } finally {
@@ -42,10 +48,14 @@ export default function TournamentRegister() {
   const today = new Date().toISOString().slice(0, 10);
   const notOpenYet = tournament?.registrationStartDate && today < tournament.registrationStartDate;
   const closed = tournament?.registrationEndDate && today > tournament.registrationEndDate;
+  const isFull = !!(tournament?.registrationLimit && tournament.registrationCount >= tournament.registrationLimit);
+  const spotsLeft = tournament?.registrationLimit ? Math.max(0, tournament.registrationLimit - tournament.registrationCount) : null;
   const windowMessage = notOpenYet
     ? `Registration opens ${tournament.registrationStartDate}.`
     : closed
     ? `Registration closed on ${tournament.registrationEndDate}.`
+    : isFull
+    ? "Registration limit has been reached. Contact the tournament organizer."
     : "";
 
   async function onSubmit(e) {
@@ -68,6 +78,37 @@ export default function TournamentRegister() {
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
+      {showFullPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowFullPopup(false)}>
+          <div
+            className="w-full max-w-sm rounded-2xl border border-red-500/40 bg-surface p-6 text-center shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowFullPopup(false)}
+              className="ml-auto block rounded-lg p-1 text-muted hover:bg-surface2"
+            >
+              <X size={18} />
+            </button>
+            <div className="text-3xl">🚫</div>
+            <div className="mt-2 font-display text-xl font-bold">Registration Full</div>
+            <div className="mt-2 text-sm text-muted">
+              Registration limit has been reached. Contact the tournament organizer.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tournament?.logoDataUrl && (
+        <div className="flex justify-center">
+          <img
+            src={tournament.logoDataUrl}
+            alt=""
+            className="h-20 w-20 rounded-2xl border border-line object-cover shadow-sm"
+          />
+        </div>
+      )}
+
       <PageHeading
         eyebrow="Tournament Registration"
         title={tournament?.name || (loadingTournament ? "Loading…" : "Register")}
@@ -80,6 +121,12 @@ export default function TournamentRegister() {
         }
       />
 
+      {tournament?.registrationLimit && !isFull && !submitted && (
+        <div className="text-center text-xs text-muted">
+          {spotsLeft} spot{spotsLeft === 1 ? "" : "s"} left of {tournament.registrationLimit}
+        </div>
+      )}
+
       {submitted ? (
         <Surface className="p-6 text-center">
           <CheckCircle2 size={32} className="mx-auto text-emerald-600 dark:text-emerald-400" />
@@ -90,7 +137,9 @@ export default function TournamentRegister() {
         </Surface>
       ) : windowMessage ? (
         <Surface className="p-6 text-sm text-muted">
-          <div className="font-medium text-ink">{notOpenYet ? "Registration hasn't opened yet" : "Registration is closed"}</div>
+          <div className="font-medium text-ink">
+            {notOpenYet ? "Registration hasn't opened yet" : isFull ? "Registration is full" : "Registration is closed"}
+          </div>
           <div className="mt-1">{windowMessage}</div>
         </Surface>
       ) : (

@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { isLoggedIn, getUserEmail } from "../lib/auth.js";
 import { api } from "../lib/api.js";
+import { resizeImageFile } from "../lib/image.js";
+import { PlayerAvatar, AVATAR_PALETTE } from "../components/ui.jsx";
 
 function emailPrefix(email) {
   return (email || "").split("@")[0] || "";
@@ -9,10 +11,15 @@ function emailPrefix(email) {
 export default function Profile() {
   const loggedIn = isLoggedIn();
   const email = getUserEmail();
+  const fileInputRef = useRef(null);
 
   const [displayName, setDisplayName] = useState("");
   const [duprId, setDuprId] = useState("");
   const [duprRating, setDuprRating] = useState("");
+  const [avatarDataUrl, setAvatarDataUrl] = useState("");
+  const [avatarColor, setAvatarColor] = useState("");
+  const [gender, setGender] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
@@ -31,6 +38,9 @@ export default function Profile() {
         setDisplayName((me.displayName || "").trim() || fallback);
         setDuprId(me.duprId || "");
         setDuprRating(me.duprRating != null ? String(me.duprRating) : "");
+        setAvatarDataUrl(me.avatarDataUrl || "");
+        setAvatarColor(me.avatarColor || "");
+        setGender(me.gender || "");
       } catch (e) {
         if (!alive) return;
         setErr(e.message || "Failed to load profile");
@@ -41,6 +51,38 @@ export default function Profile() {
       alive = false;
     };
   }, [loggedIn, email]);
+
+  async function onPhotoChosen(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-choosing the same file later
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setErr("Please choose an image file.");
+      return;
+    }
+
+    setErr("");
+    setUploading(true);
+    try {
+      const dataUrl = await resizeImageFile(file);
+      setAvatarDataUrl(dataUrl);
+      setAvatarColor(""); // a real photo takes priority over a color avatar
+    } catch (e2) {
+      setErr(e2.message || "Couldn't process that image.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removePhoto() {
+    setAvatarDataUrl("");
+  }
+
+  function pickColor(hex) {
+    setAvatarColor(hex);
+    setAvatarDataUrl(""); // picking a color clears any uploaded photo
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -63,7 +105,14 @@ export default function Profile() {
     }
 
     try {
-      await api.putMe({ displayName: name, duprId: duprId.trim(), duprRating: ratingTrim || null });
+      await api.putMe({
+        displayName: name,
+        duprId: duprId.trim(),
+        duprRating: ratingTrim || null,
+        avatarDataUrl,
+        avatarColor,
+        gender,
+      });
       setMsg("Saved ✅");
     } catch (e2) {
       setErr(e2.message || "Save failed");
@@ -105,7 +154,95 @@ export default function Profile() {
               Logged in as: <span className="font-semibold">{email || "user"}</span>
             </div>
 
-            <form onSubmit={save} className="mt-5 space-y-4">
+            <form onSubmit={save} className="mt-5 space-y-5">
+              <div>
+                <label className="text-xs text-muted">Gender (optional)</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[
+                    { value: "", label: "Prefer not to say" },
+                    { value: "male", label: "Male" },
+                    { value: "female", label: "Female" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value || "unset"}
+                      type="button"
+                      onClick={() => setGender(opt.value)}
+                      className={`rounded-xl border-2 px-3 py-2 text-xs font-semibold transition ${
+                        gender === opt.value
+                          ? "border-accent bg-accent text-accent-ink"
+                          : "border-line bg-surface2 text-ink hover:border-accent/50"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-muted">
+                  Helps identify Men's/Women's/Mixed matchups, and picks a cartoon avatar if you haven't uploaded a
+                  photo.
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted">Profile Photo / Avatar</label>
+                <div className="mt-2 flex flex-wrap items-center gap-4">
+                  <PlayerAvatar
+                    name={displayName || "?"}
+                    avatarDataUrl={avatarDataUrl}
+                    avatarColor={avatarColor}
+                    gender={gender}
+                    size={72}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className="rounded-xl border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:bg-line disabled:opacity-40"
+                    >
+                      {uploading ? "Processing…" : "Upload Photo"}
+                    </button>
+                    {avatarDataUrl && (
+                      <button
+                        type="button"
+                        onClick={removePhoto}
+                        className="rounded-xl border border-line bg-surface2 px-3 py-2 text-xs font-medium transition hover:bg-line"
+                      >
+                        Remove Photo
+                      </button>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={onPhotoChosen}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 text-xs text-muted">
+                  {gender ? "Or pick a background color for your cartoon avatar:" : "Or pick a color instead of a photo:"}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {AVATAR_PALETTE.map((hex) => (
+                    <button
+                      key={hex}
+                      type="button"
+                      onClick={() => pickColor(hex)}
+                      title={hex}
+                      className={`h-7 w-7 rounded-full border-2 transition ${
+                        avatarColor === hex && !avatarDataUrl ? "border-ink scale-110" : "border-line"
+                      }`}
+                      style={{ background: hex }}
+                    />
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-muted">
+                  Shown on Player Rankings, team rosters, and anywhere else your name appears.
+                </div>
+              </div>
+
               <div>
                 <label className="text-xs text-muted">Display Name</label>
                 <input
@@ -168,4 +305,3 @@ export default function Profile() {
     </div>
   );
 }
-

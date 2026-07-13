@@ -127,18 +127,64 @@ Endpoints:
 
 Frontend: `src/pages/PlayerRankings.jsx`, nav item "Player Rankings".
 
+### Engagement features (streaks, rank changes, online status, share cards)
+
+`computePlayerStandings()` returns a few extra fields per player beyond
+points/wins/losses, all computed from data already available — no new
+tables, no cron jobs:
+
+- **`streak`** — current consecutive-win count, computed by sorting each
+  player's chronological match log and counting backward from the most
+  recent result until a non-win breaks it. Shown as a flame badge (🔥)
+  next to the player's name once it hits 3+.
+- **`online`** — reuses the same `lastActiveAt` presence data as the
+  admin "Registered Users" page (a green dot, active within the last 5
+  minutes), matched by display name the same way DUPR is. Unlike the
+  admin version, this is available to any logged-in member — presence
+  on the rankings page isn't sensitive the way the full admin user list
+  is.
+- **`rankChange`** — compares today's rank against a daily snapshot
+  stored as its own item (`PLAYERRANK_SNAPSHOT#{scope}` in
+  `EVENTS_TABLE`, where scope is the tournament ID or `"CLUB"` for the
+  overall view). No scheduled job: whoever loads rankings first each day
+  triggers the comparison-then-overwrite — the snapshot only updates
+  once per calendar day regardless of how many times rankings are
+  viewed, so the comparison is always "vs. yesterday," not "vs. 5
+  minutes ago."
+- **Frontend-only, no backend involved**:
+  - **"Points to overtake" chase line** — for the logged-in viewer,
+    finds their own row (matched by display name) and the player
+    immediately above them, shows the point gap.
+  - **Podium** — glowing top-3 cards (gold/silver/bronze) plus the same
+    bouncing-pickleball-with-fire animation used on Team Standings.
+  - **Share card** — a `<canvas>`-rendered PNG (rank, name, points,
+    W/L/T, streak) generated entirely client-side, no server round-trip
+    or image-generation dependency. Uses the Web Share API on devices
+    that support sharing files, falls back to a plain download
+    everywhere else.
+
+No new API Gateway routes needed — this all rides on the existing
+player-rankings routes, just with a richer response.
+
 ### Doubles/singles player picker
 
 On a tournament's "Add Match" form, after picking Team A / Team B, the
-form now renders player-name dropdowns sourced from each team's saved
-roster:
+form renders player-name dropdowns sourced from each team's saved
+roster, plus the tournament's player pool, plus a "+ Add new player…"
+option:
 
 - **Doubles** → 2 player dropdowns per team
 - **Singles** → 1 player dropdown per team
 
-A team with no saved roster shows a prompt to save teams first. Picking
-fewer than the required number, or the same player twice on one side, is
-blocked client-side and server-side with a clear error message.
+**Players are optional, not required.** Leave both sides blank to record
+a match with just a team score and no per-player tracking — it still
+counts fully toward Team Standings. If you do pick players, it has to
+be the exact right count per side (2 for doubles, 1 for singles, no
+partial picks) or the same player twice on one side — both are rejected
+with a clear error, client-side and server-side. Player Rankings simply
+skips matches with no player data when computing individual stats,
+exactly like it always has for older matches created before this
+feature existed — this is a deliberate, harmless gap, not a bug.
 
 ### Weekly match schedule (saved, editable, holiday-aware)
 
@@ -293,21 +339,33 @@ A tournament-wide, reusable list of player names — set up once, pick from
 it everywhere instead of retyping names on every team or every schedule
 fixture.
 
-- **Grows automatically**: saving a team roster (`updateTournamentTeams`)
-  or saving a schedule (`saveTournamentSchedule`) merges whatever names
-  were used into the tournament's `playerPool` array server-side
-  (`mergePlayerPool()` — case-insensitive de-dupe, first-seen casing
-  wins, alphabetically sorted). You don't have to manage it by hand for
-  this to work.
-- **Directly manageable too**: the "Player Pool" panel inside Teams &
+- **Grows automatically only from registrations**: whenever someone
+  registers via the tournament's registration link, their name is added
+  to `playerPool` automatically (`createRegistration` calls
+  `mergePlayerPool()` — case-insensitive de-dupe, first-seen casing
+  wins, alphabetically sorted). Registering is the one thing treated as
+  "this is a real prospective player" strongly enough to auto-add.
+  **It does NOT grow from team rosters or the schedule anymore** — an
+  earlier version of this feature auto-merged any name typed onto a
+  roster or a schedule fixture into the pool too, which surprised admins
+  (a name typed once for one team would suddenly show up as a
+  standalone pool entry). Removed by request — the pool now only
+  reflects what's explicitly added or who actually registered.
+- **Directly manageable**: the "Player Pool" panel inside Teams &
   Players lets you add a player before they're on any roster, or remove
   one, then **Save Pool** persists it via its own endpoint
   (`PUT /tournaments/{id}/player-pool`) — kept separate from the
   team-save endpoint for the same reason the registration window is
   separate: editing the pool should never risk touching roster data.
-- **Roster inputs get autocomplete**: a `<datalist>` populated from the
-  pool backs every player-name `<input>` in the roster table — still
-  free text, just with suggestions.
+- **Roster player selection pulls from Registrations too**: each
+  player slot in the Teams & Players table is now a `<select>` with two
+  groups — "Registered players" (from the tournament's Registrations
+  panel, i.e. people who actually signed up via the registration link)
+  and "Player pool" (everyone else in the pool who isn't already a
+  registrant), plus a "+ Add new player…" option. This makes the natural
+  workflow — people register, then you assign them to teams — a direct
+  pick instead of retyping names. Registered players always show first
+  since they're the most likely source for a real roster.
 - **Schedule fixture pickers now show two groups**: "Team roster" (that
   fixture's own team) and "Other pool players" (everyone else in the
   pool — useful for subs who aren't on the formal roster), plus a
@@ -368,6 +426,27 @@ without needing an account, plus a paid/unpaid tracker for admins.
   routed outside `RequireAuth` in `App.jsx`) — anyone with the link can
   submit their name, **required email**, optional phone, and notes, with
   no login. Email is validated both client-side and server-side.
+- **Duplicate registrations are blocked server-side**: before creating a
+  new registration, `createRegistration` checks every existing
+  registration for that tournament and rejects the submission if the
+  email, name, or phone number (case-insensitive, phone digits-only)
+  matches an existing one — so a re-submit with a typo'd name but the
+  same email still gets caught, and vice versa. An empty phone never
+  counts as a match against another empty phone. This is enforced on
+  the backend specifically because the registration route is public —
+  client-side-only validation would be trivial to bypass by anyone
+  hitting the API directly.
+- **Optional registration limit**: settable at tournament creation or
+  edited later via the "Registration Window" panel (blank = unlimited).
+  Checked server-side in `createRegistration` — once the count of
+  existing registrations meets the limit, new submissions are rejected
+  with "Registration limit has been reached. Contact the tournament
+  organizer." The admin panel shows the live count ("12 of 20
+  registered", with a "Full" badge once reached); the public form shows
+  "X spots left" while open, and a popup + inline blocking message once
+  full, matching the pattern used for the registration window dates.
+  `getTournamentPublicInfo` only bothers querying the current count when
+  a limit is actually set — no wasted query for unlimited tournaments.
 - **Two new public routes**, alongside the analytics one from section 7:
   - `GET /tournaments/{id}/public-info` — minimal, safe info only (name,
     dates, status). Deliberately does **not** return `teams`/rosters,
@@ -578,7 +657,283 @@ before this fix, refreshing Standings/Rankings after deploying should
 correct the totals automatically — no manual data fix needed, since
 standings are computed fresh from match data every time, not stored.
 
-## 14. Mobile apps (iOS & Android via Capacitor)
+## 14. Feature: Manual Standings Override
+
+Team Standings is entirely computed from match data every time the page
+loads — nothing is stored. That's normally the right design (always
+accurate, never stale), but it means there was no way to correct a
+team's numbers if the underlying match data got damaged (e.g. legitimate
+matches accidentally cleared, as documented above) and the real
+historical totals were known but the match records weren't recoverable.
+
+- **"Edit" button on each Team Standings row** (owner/admin only) opens
+  inline fields for Points, W, L, T, PF, PA. **Save Override** sets a
+  `standingsOverride` object on that team (stored on the team itself,
+  inside `tournament.teams[]`) which `computeStandings` applies **after**
+  computing the real numbers from matches — the override completely
+  replaces the computed row for that team, and a "Manual" badge shows
+  next to the team name so it's clear the number isn't derived from
+  matches anymore.
+- **"Reset to Computed"** removes the override and goes back to normal
+  match-derived numbers.
+- Implementation: `updateTeamStandingsOverride` rewrites the whole
+  `teams` array (same reasoning as team color/pool — DynamoDB can't
+  patch one array element by matching a field), via its own endpoint,
+  kept separate from team-save/roster logic for the same safety reason
+  as every other isolated feature in this project.
+- **This is a last resort, not a replacement for correct match data.**
+  An override doesn't reconcile with future matches — if new matches
+  are recorded for an overridden team, the computed numbers keep
+  accumulating underneath, invisible until the override is reset. Use it
+  for a one-time correction, then reset it once you trust the match data
+  again (or just leave it if the tournament is over and the numbers are
+  final).
+
+**Required setup — one new API Gateway route:**
+
+`PUT /tournaments/{id}/teams/{teamId}/standings-override` — **with**
+the `paddlehubs-cognito-jwt` authorizer, deployed to your stage.
+
+**Recording a score from the Schedule could silently accept empty
+player slots.** `resizePlayers()` always pads its result to a fixed
+length with empty strings — so a check like `fx.teamAPlayers?.length`
+is always truthy at the required length, even when every slot is blank.
+`recordFixtureMatch` had exactly this weak check. Fixed to match the
+Add Match form's already-correct pattern: trim and filter out empty
+entries first, *then* compare the count against how many players are
+actually required. The regular Add Match form and the Matches table's
+inline Edit already did this correctly — only the schedule's score
+recording had the gap.
+
+**Add Match's player pickers only showed that team's own saved
+roster.** Brought up to the same standard as the schedule's fixture
+pickers: each dropdown now shows "Team roster" and "Other pool players"
+as separate groups, plus a "+ Add new player…" option that prompts for
+a name and adds it to the pool immediately — so a team with no saved
+roster yet isn't a dead end anymore.
+
+## 15. Feature: MLP One-Day Singles Tournament Format
+
+A second tournament format, alongside "Standard" — modeled on an MLP-
+style one-day singles team event (6 teams, 4 players each, 4 singles
+games per matchup, a DreamBreaker tiebreak, and its own points scale).
+This is a genuinely different format, not a variant of the standard
+one, so it gets its own scoring config, tiebreak logic, and playoff
+bracket rather than trying to force it into the existing win/tie/loss
+model.
+
+### Format selection
+
+- Chosen at tournament creation (`Tournaments.jsx`) via a **Format**
+  dropdown — "Standard" or "MLP One-Day Singles." Picking MLP defaults
+  team count to 6 and players per team to 4 (still adjustable).
+- Stored on the tournament as `format: "mlp_singles"`. A "MLP Singles"
+  badge shows next to the tournament name wherever it appears.
+
+### Per-tournament scoring
+
+- Standard-format tournaments are completely unaffected — they still use
+  the global `TEAM_WIN_POINTS`/`TEAM_TIE_POINTS`/`TEAM_LOSS_POINTS` env
+  vars, exactly as before.
+- MLP tournaments store their own `mlpScoring` object
+  (`{regWin, dbWin, dbLoss, regLoss}`) on the tournament, editable at
+  creation (defaults straight from the rulebook: 3/2/1/0). `computeStandings`
+  checks `tournament.format` and picks the right scale per match.
+
+### DreamBreaker tiebreak
+
+- A match's winner is normally decided by games won. For MLP matches,
+  if games finish tied (e.g. 2-2 in a 4-game matchup), a **DreamBreaker**
+  score becomes required — the Add Match form detects this automatically
+  (live games-won tally) and shows a DreamBreaker score input in place of
+  leaving the match a "tie."
+- Backend: `validateMatchPayload` accepts an optional `dreamBreaker:
+  {played, scoreA, scoreB}`. When present, its winner **overrides** the
+  normal tied-games "TIE" result — DreamBreaker score can't itself be a
+  tie (rejected if so). Whether a match went to a DreamBreaker also
+  determines which points tier applies in `computeStandings` (dbWin/
+  dbLoss vs regWin/regLoss).
+- Clearing a match's score (Clear Score) also clears any DreamBreaker
+  data on it, so a cleared match is genuinely blank, not half-reset.
+- **Not yet wired into the Schedule's inline score recording or the
+  Matches table's inline Edit** — DreamBreaker is only supported via the
+  Add Match form right now. Recording an MLP match that needs a
+  DreamBreaker should go through Add Match.
+
+### Player Rankings for MLP matches (per-game player attribution)
+
+A whole MLP matchup involves **4 different players each playing their
+own individual game** — Player 1 vs Player 1, Player 2 vs Player 2, and
+so on. The rest of the app's match model only ever tracked one player
+per side for the *whole* match, which is correct for a normal singles
+match (same two players for every game) but wrong for MLP (crediting
+one player with a result that was actually 4 different people's games).
+
+- Each game score in the Add Match form now optionally carries its own
+  `playerA`/`playerB` — shown only when the tournament is MLP format, one
+  player-select pair per game, sourced from that team's roster plus the
+  player pool.
+- `computePlayerStandings` checks each match for per-game player data
+  first (`games[i].playerA`/`playerB`). If present, **each game is
+  scored independently** for its own named players — this is what makes
+  individual MLP rankings accurate. If absent (every other match in the
+  app), it falls back to the original whole-match logic exactly as
+  before — this is fully backward compatible, nothing changes for
+  Standard-format tournaments or matches that don't use per-game
+  players.
+- This is optional, not required — leaving per-game players blank still
+  records the match and its score normally, just without contributing
+  to individual Player Rankings (same as any other match with no player
+  data).
+
+### Playoff bracket (top 4 → semifinals → championship + optional 3rd place)
+
+- New, tournament-format-agnostic feature (works for Standard
+  tournaments too, not just MLP) — a "Playoffs" section on the
+  tournament page.
+- **Generate Bracket**: seeds the top 4 teams from current standings —
+  Semifinal 1 = Seed 1 vs Seed 4, Semifinal 2 = Seed 2 vs Seed 3. Stored
+  as `tournament.playoffs = { seeds, semifinal1, semifinal2,
+  championship, thirdPlace }`.
+- Each bracket slot has a dropdown to **link an existing recorded
+  match** between those two teams (matches are matched by team-pair, not
+  auto-created — you still record the actual result via Add Match/
+  Schedule/Edit as normal, then link it here).
+- **Advance to Championship / 3rd Place**: once both semifinals are
+  linked to matches with a real winner, this reads those results and
+  populates the championship (winners) and third-place (losers) slots
+  automatically.
+- **Regenerate bracket** is available any time — re-seeds from current
+  standings (useful if a standings override changed the top 4).
+
+**Required setup — three new API Gateway routes**, all **with** the
+`paddlehubs-cognito-jwt` authorizer:
+
+1. `POST /tournaments/{id}/playoffs/generate`
+2. `PUT /tournaments/{id}/playoffs/{slot}`
+3. `POST /tournaments/{id}/playoffs/advance`
+
+No new routes needed for the format/DreamBreaker pieces — those reuse
+`POST /tournaments` (create) and the existing match create/update
+routes, just with additional optional fields.
+
+## 16. Feature: Profile Photos, Avatar Colors, and Team Captains
+
+### Profile photo / avatar
+
+- **No new AWS infrastructure**: rather than a presigned S3 upload
+  pipeline (new bucket/CORS/IAM), a chosen photo is resized to ~200px
+  and compressed to JPEG client-side (`resizeImageFile()` in
+  `Profile.jsx`, using a canvas), then stored directly as a base64 data
+  URL on the player's `PLAYERS_TABLE` record (`avatarDataUrl`). Capped at
+  180KB server-side in `putMe` as a safety net — DynamoDB items max out
+  around 400KB total, and this is one field among several on the same
+  item.
+- **Or pick a color instead**: `avatarColor` — a swatch from the same
+  palette team colors use, shown as a colored initials circle instead of
+  a photo. Picking a color clears any uploaded photo and vice versa
+  (mutually exclusive, both nullable via `PUT /me`).
+- **Displayed via `PlayerAvatar`** (`src/components/ui.jsx`) — shows the
+  real photo when `avatarDataUrl` is set, otherwise falls back to a
+  colored initials circle (custom `avatarColor` if set, else a
+  deterministic hash-based color so the same name is always the same
+  color). Currently wired into Player Rankings (card carousel + table).
+- **Enrichment**: `avatarDataUrl`/`avatarColor` ride along on the same
+  name-matched enrichment DUPR and online-status already use
+  (`listAllPlayerActivity()` → `computePlayerStandings`) — no new
+  lookups needed.
+- **Known limitation**: native HTML `<select>` dropdowns (Add Match,
+  Schedule fixture pickers, roster player selects) can't render images —
+  that's a browser limitation. Avatars show everywhere players are
+  *displayed*, not in the dropdowns used to *pick* them. Solving that
+  would mean replacing every player-picker `<select>` with a custom
+  combobox component — flagged as a bigger follow-up, not attempted here.
+
+### Team captains
+
+- Each team can have one **captain** — a player already on that team's
+  roster, picked via a small toggle button under their name in the
+  Teams & Players table ("Make captain" / "Captain").
+- Stored as `captain: <player name>` on the team object, alongside
+  `color`. Validated server-side in `updateTournamentTeams`: a captain
+  pick that isn't actually one of that team's own players (e.g. stale
+  after a roster edit) is silently cleared rather than erroring the
+  whole save.
+- **Visual standard**: a small circular "C" badge (`CaptainBadge` in
+  `ui.jsx`) — the sports-armband convention — shown next to the
+  captain's name in the roster editor and in Team Standings' player
+  list. `computeStandings` passes `captain` through on each team's
+  standings row so the frontend can badge it without a second lookup.
+- No new API Gateway routes for either feature — both ride on the
+  existing `PUT /me` and team-save endpoints.
+
+### Gender and cartoon avatar fallback
+
+- Optional `gender` field on the profile (`male` / `female` / unset),
+  set via a pill selector on the Profile page. Stored the same way as
+  DUPR/avatar — validated and merged through `putMe`, enriched onto
+  Player Rankings the same name-matched way as everything else.
+- **Cartoon avatar fallback chain in `PlayerAvatar`**: real uploaded
+  photo first → gender-based cartoon icon if gender is set but no photo
+  → colored initials circle otherwise. The cartoon icons
+  (`MaleCartoonAvatar`/`FemaleCartoonAvatar` in `ui.jsx`) are original,
+  simple hand-drawn SVG shapes — not a photo, not any existing character
+  or stock asset — and their background color follows `avatarColor` if
+  one's been picked.
+- **Intended future use**: gender is tracked now specifically so a later
+  feature (categorizing/filtering matches as Men's/Women's/Mixed
+  Doubles or Singles) has real data to work from — that categorization
+  itself hasn't been built yet, just the underlying field.
+- **Small "M"/"F" badge** (`GenderBadge` in `ui.jsx`, same blue/pink
+  color language as the cartoon avatars) shown next to a player's name
+  wherever gender data is actually available:
+  - **Player Rankings** (table and carousel) — direct, since standings
+    rows are already name-matched and enriched with `gender`.
+  - **Team Standings' player list** — required a small backend addition:
+    `computeStandings` now also does the same name-matching enrichment
+    computePlayerStandings already did, producing a `playerGenders: {
+    [name]: gender }` map per team row (kept separate from the `players`
+    array itself, which stays a plain string list for backward
+    compatibility with anything already consuming it).
+  - **Not shown in the Teams & Players roster editor or any player-
+    picker dropdown** — the roster editor sources names from
+    registrations/pool, which don't carry gender at all (registering for
+    a tournament is anonymous, not tied to an account), and native
+    `<select>` dropdowns can't render badges regardless, same limitation
+    as avatars.
+
+## 17. Feature: Tournament Logos
+
+Same approach as profile photos — a chosen image is resized client-side
+(`src/lib/image.js` — extracted from Profile's original inline version
+so it's shared, not duplicated) and stored directly as a base64 data URL
+on the tournament item (`logoDataUrl`), no S3 pipeline or new AWS
+infrastructure needed. Backend validation (`validateImageDataUrl()` in
+`lambda_index.mjs`) is also shared between profile avatars and
+tournament logos rather than duplicated.
+
+- **At creation**: an "Upload Logo" button on the create-tournament form
+  (`Tournaments.jsx`), optional.
+- **On an existing tournament**: "Add Logo" / "Change Logo" / "Remove"
+  next to the tournament name on its own page (owner/admin only) — its
+  own dedicated endpoint (`PUT /tournaments/{id}/logo`,
+  `updateTournamentLogo()`), same reasoning as the registration window
+  and player pool: editing the logo should never risk touching teams,
+  schedule, or any other tournament data.
+- **Shown**: the tournament list (small thumbnail, falls back to a
+  letter-avatar square if no logo), the tournament's own page header,
+  the public registration page, and the "Upcoming Tournaments" promo
+  card carousel (`PromoCard` in `ui.jsx` now takes an optional `logoUrl`
+  that overlays the gradient background when present).
+- `getTournamentPublicInfo` includes `logoDataUrl` so the public
+  registration page can show it without needing a login.
+
+**Required setup — one new API Gateway route:**
+
+`PUT /tournaments/{id}/logo` — **with** the `paddlehubs-cognito-jwt`
+authorizer, deployed to your stage.
+
+## 18. Mobile apps (iOS & Android via Capacitor)
 
 The React app is wrapped as real installable iOS/Android apps using
 [Capacitor](https://capacitorjs.com/) — it reuses 100% of the existing
@@ -672,7 +1027,7 @@ intent filter to the existing `MainActivity` entry:
   credentials), it satisfies both Apple's and Google's third-party login
   review requirements out of the box
 
-## 15. Known housekeeping
+## 19. Known housekeeping
 
 - A stray `paddlehubs-site/` subfolder (leftover debris with an old
   `index.html` and `eslint.config.js`) and unused Vite boilerplate CSS

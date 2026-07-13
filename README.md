@@ -55,6 +55,16 @@ Court, Grand Slam) and both light and dark mode, on desktop and mobile.
   matches by itself; a "Use" button on any fixture loads it straight into
   Add Match to record the real outcome. Deletable at the whole-schedule,
   single-week, or single-fixture level if something needs fixing
+- **MLP One-Day Singles tournament format** — a second format option
+  alongside Standard, with its own points scale, a DreamBreaker tiebreak
+  for tied matches, and a top-4 playoff bracket (semifinals →
+  championship + optional 3rd place)
+- **Tournament logos** — upload or update a logo for any tournament,
+  shown on the tournament list, its own page, the public registration
+  page, and the upcoming-tournaments carousel
+- **Profile photos & team captains** — upload a photo or pick a color
+  avatar in your profile, shown on Player Rankings and team rosters;
+  each team can designate a captain, marked with a small "C" badge
 - **Player Pool** — a reusable, tournament-wide list of players that
   grows automatically from team rosters and schedule fixtures, with
   autocomplete on roster inputs and a "+ Add new player" option right
@@ -86,7 +96,7 @@ Court, Grand Slam) and both light and dark mode, on desktop and mobile.
   list has its own search filter and newest/oldest sort toggle
 - **Responsive** — built mobile-first, tested down to narrow phone widths
 - **iOS & Android apps** — the same app wrapped natively via Capacitor;
-  see [RUNBOOK.md § Mobile apps](./RUNBOOK.md#14-mobile-apps-ios--android-via-capacitor)
+  see [RUNBOOK.md § Mobile apps](./RUNBOOK.md#18-mobile-apps-ios--android-via-capacitor)
 
 ## Tech stack
 

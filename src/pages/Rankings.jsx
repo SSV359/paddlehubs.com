@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { isLoggedIn } from "../lib/auth.js";
 import { api } from "../lib/api.js";
-import fireworksGif from "../assets/fireworks.gif";
 
 
 function classNames(...xs) {
@@ -38,7 +37,53 @@ function medalForRank(rank) {
   return "";
 }
 
-const PODIUM_GIF = fireworksGif;
+// A tiny pickleball bouncing inside a square box, with a glowing "fire"
+// aura that bounces along with it — replaces the old static fireworks
+// GIF with something that's actually animated and on-theme.
+function PickleballFireBox() {
+  return (
+    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-line bg-surface2">
+      <div className="absolute inset-0 flex items-end justify-center pb-1.5">
+        <div className="relative" style={{ animation: "pb-bounce 1s ease-in-out infinite" }}>
+          {/* fire glow, bounces with the ball */}
+          <div
+            className="absolute -inset-2.5 rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle, rgba(255,150,20,0.85) 0%, rgba(255,70,0,0.45) 50%, transparent 72%)",
+              filter: "blur(3px)",
+              animation: "pb-flicker 0.5s ease-in-out infinite alternate",
+            }}
+          />
+          {/* the ball itself */}
+          <div
+            className="relative h-6 w-6 rounded-full border border-black/10"
+            style={{
+              background: "radial-gradient(circle at 32% 28%, #fbffb0 0%, #e8ff5a 45%, #c9dd3a 100%)",
+              boxShadow: "0 0 8px 2px rgba(255,140,0,0.85)",
+            }}
+          >
+            <span className="absolute left-[7px] top-[5px] h-[3px] w-[3px] rounded-full bg-black/25" />
+            <span className="absolute left-[14px] top-[9px] h-[3px] w-[3px] rounded-full bg-black/25" />
+            <span className="absolute left-[6px] top-[13px] h-[3px] w-[3px] rounded-full bg-black/25" />
+            <span className="absolute left-[13px] top-[15px] h-[3px] w-[3px] rounded-full bg-black/25" />
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes pb-bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-22px); }
+        }
+        @keyframes pb-flicker {
+          0% { opacity: 0.7; transform: scale(0.92); }
+          100% { opacity: 1; transform: scale(1.08); }
+        }
+      `}</style>
+    </div>
+  );
+}
 
 function PodiumCard({ standings }) {
   const top3 = (standings || []).slice().sort((a, b) => (a.rank || 999) - (b.rank || 999)).slice(0, 3);
@@ -87,12 +132,7 @@ function PodiumCard({ standings }) {
           <div className="text-xs text-muted mt-1">Top teams so far (updates automatically).</div>
         </div>
 
-        <img
-          src={PODIUM_GIF}
-          alt="podium gif"
-          className="h-16 w-16 rounded-2xl border border-line object-cover"
-          loading="lazy"
-        />
+        <PickleballFireBox />
       </div>
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">

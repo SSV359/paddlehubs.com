@@ -143,6 +143,7 @@ export interface Playoffs {
 }
 
 export interface ScheduleFixture {
+  fixtureId: string; // stable identity for this fixture — chat threads and reminders key off this, not array position
   teamAId: string;
   teamBId: string;
   court: string;
@@ -151,6 +152,16 @@ export interface ScheduleFixture {
   teamAPlayers: RosterPlayer[];
   teamBPlayers: RosterPlayer[];
   matchId: string;
+}
+
+export interface FixtureMessage {
+  id: string;
+  fixtureId: string;
+  tournamentId: string;
+  senderSub: string;
+  senderName: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface ScheduleWeek {

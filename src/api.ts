@@ -18,6 +18,7 @@ import type {
   SiteAnalytics,
   StandingsOverride,
   RosterPlayer,
+  FixtureMessage,
 } from './types';
 
 export class ApiError extends Error {
@@ -172,6 +173,14 @@ export const saveTournamentSchedule = (id: string, weeks: TournamentSchedule['we
   request<TournamentSchedule>('PUT', `/tournaments/${id}/schedule`, { weeks }).then(normSchedule);
 export const deleteTournamentSchedule = (id: string) =>
   request<{ ok: true }>('DELETE', `/tournaments/${id}/schedule`);
+
+// Fixture chat — one thread per scheduled fixture, restricted to that
+// fixture's own players (plus admin/owner). Naturally stays on-topic
+// since it's scoped to a specific upcoming match, not a general inbox.
+export const listFixtureMessages = (tournamentId: string, fixtureId: string) =>
+  request<{ items: FixtureMessage[] }>('GET', `/tournaments/${tournamentId}/fixtures/${fixtureId}/messages`);
+export const postFixtureMessage = (tournamentId: string, fixtureId: string, text: string) =>
+  request<FixtureMessage>('POST', `/tournaments/${tournamentId}/fixtures/${fixtureId}/messages`, { text });
 
 // Tournament matches
 export const listTournamentMatches = (id: string) =>

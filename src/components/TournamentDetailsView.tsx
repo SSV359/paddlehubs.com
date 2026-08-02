@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppState } from '../AppContext';
 import { AuctionRoom } from './AuctionRoom';
 import { NetDivider } from './NetDivider';
@@ -16,6 +16,7 @@ import type {
   TournamentRegistration,
   TournamentTeam,
   RosterPlayer,
+  Me,
 } from '../types';
 import {
   ArrowLeft,
@@ -47,6 +48,8 @@ import {
   Share2,
   Medal,
   Gavel,
+  MessageCircle,
+  Send,
 } from 'lucide-react';
 
 type SubTab = 'overview' | 'standings' | 'player-rankings' | 'teams' | 'matches' | 'schedule' | 'registrations' | 'playoffs' | 'auction';
@@ -343,6 +346,7 @@ export const TournamentDetailsView: React.FC = () => {
             loading={loadingTab}
             isAdmin={canEdit}
             isAuthenticated={isAuthenticated}
+            currentUser={currentUser}
             api={api}
             onChanged={() => { loadTabData('schedule'); loadTabData('matches'); refreshPlayerRankings(); }}
           />
@@ -1032,10 +1036,12 @@ const SchedulePanel: React.FC<{
   loading: boolean;
   isAdmin: boolean;
   isAuthenticated: boolean;
+  currentUser: Me | null;
   api: any;
   onChanged: () => void;
-}> = ({ tour, schedule, matches, loading, isAdmin, isAuthenticated, api, onChanged }) => {
+}> = ({ tour, schedule, matches, loading, isAdmin, isAuthenticated, currentUser, api, onChanged }) => {
   const [recordingFixture, setRecordingFixture] = useState<{ weekIdx: number; fixtureIdx: number } | null>(null);
+  const [chatFixture, setChatFixture] = useState<{ fixtureId: string; label: string } | null>(null);
   const [showGenerator, setShowGenerator] = useState(false);
 
   // MLP-style events run as same-day/short-interval "Rounds"; standard
@@ -1102,33 +1108,46 @@ const SchedulePanel: React.FC<{
                     const teamA = (tour.teams || []).find(t => t.id === f.teamAId);
                     const teamB = (tour.teams || []).find(t => t.id === f.teamBId);
                     const recordedMatch = f.matchId ? matchById.get(f.matchId) : undefined;
+                    const myEmail = (currentUser?.email || '').trim().toLowerCase();
+                    const isParticipant = [...f.teamAPlayers, ...f.teamBPlayers].some((p) => p.email && p.email === myEmail);
+                    const canChat = isAuthenticated && (isAdmin || isParticipant) && !!f.fixtureId;
 
                     return (
-                      <button
-                        key={fixtureIdx}
-                        onClick={() => isAuthenticated && !recordedMatch && setRecordingFixture({ weekIdx, fixtureIdx })}
-                        disabled={!isAuthenticated || !!recordedMatch}
-                        className={`w-full flex justify-between items-center text-xs rounded-lg px-3 py-2 transition-all ${
-                          recordedMatch ? 'bg-court-green/5 border border-court-green/20 cursor-default' : 'bg-off-white hover:bg-court-green/5 cursor-pointer border border-transparent hover:border-court-green/20'
-                        }`}
-                      >
-                        <span className="text-left">
-                          <span className="font-semibold text-charcoal block">{teamA?.name || 'TBD'} vs {teamB?.name || 'TBD'}</span>
-                          {(f.teamAPlayers?.length || f.teamBPlayers?.length) ? (
-                            <span className="text-[10px] text-slate-gray font-mono block mt-0.5">{f.teamAPlayers.map((p) => p.name).join(' & ') || '—'} vs {f.teamBPlayers.map((p) => p.name).join(' & ') || '—'}</span>
-                          ) : null}
-                        </span>
-                        <span className="flex items-center gap-2 shrink-0">
-                          {recordedMatch ? (
-                            <span className="font-mono font-bold text-court-green">{recordedMatch.scoreA} - {recordedMatch.scoreB} &bull; Recorded</span>
-                          ) : (
-                            <>
-                              <span className="text-slate-gray font-mono">{f.court}</span>
-                              {isAuthenticated && <span className="text-[10px] font-mono text-court-green font-bold uppercase">Record &rarr;</span>}
-                            </>
-                          )}
-                        </span>
-                      </button>
+                      <div key={fixtureIdx} className="flex items-stretch gap-1.5">
+                        <button
+                          onClick={() => isAuthenticated && !recordedMatch && setRecordingFixture({ weekIdx, fixtureIdx })}
+                          disabled={!isAuthenticated || !!recordedMatch}
+                          className={`flex-1 flex justify-between items-center text-xs rounded-lg px-3 py-2 transition-all ${
+                            recordedMatch ? 'bg-court-green/5 border border-court-green/20 cursor-default' : 'bg-off-white hover:bg-court-green/5 cursor-pointer border border-transparent hover:border-court-green/20'
+                          }`}
+                        >
+                          <span className="text-left">
+                            <span className="font-semibold text-charcoal block">{teamA?.name || 'TBD'} vs {teamB?.name || 'TBD'}</span>
+                            {(f.teamAPlayers?.length || f.teamBPlayers?.length) ? (
+                              <span className="text-[10px] text-slate-gray font-mono block mt-0.5">{f.teamAPlayers.map((p) => p.name).join(' & ') || '—'} vs {f.teamBPlayers.map((p) => p.name).join(' & ') || '—'}</span>
+                            ) : null}
+                          </span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            {recordedMatch ? (
+                              <span className="font-mono font-bold text-court-green">{recordedMatch.scoreA} - {recordedMatch.scoreB} &bull; Recorded</span>
+                            ) : (
+                              <>
+                                <span className="text-slate-gray font-mono">{f.court}</span>
+                                {isAuthenticated && <span className="text-[10px] font-mono text-court-green font-bold uppercase">Record &rarr;</span>}
+                              </>
+                            )}
+                          </span>
+                        </button>
+                        {canChat && (
+                          <button
+                            onClick={() => setChatFixture({ fixtureId: f.fixtureId, label: `${teamA?.name || 'TBD'} vs ${teamB?.name || 'TBD'}` })}
+                            title="Chat about this match"
+                            className="shrink-0 w-9 rounded-lg border border-light-border bg-white hover:border-court-green hover:bg-court-green/5 text-slate-gray hover:text-court-green transition-all cursor-pointer flex items-center justify-center"
+                          >
+                            <MessageCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     );
                   })}
                   {(() => {
@@ -1160,6 +1179,17 @@ const SchedulePanel: React.FC<{
             setRecordingFixture(null);
             onChanged();
           }}
+        />
+      )}
+
+      {chatFixture && (
+        <FixtureChatModal
+          tour={tour}
+          fixtureId={chatFixture.fixtureId}
+          label={chatFixture.label}
+          currentUser={currentUser}
+          api={api}
+          onClose={() => setChatFixture(null)}
         />
       )}
     </div>
@@ -1272,6 +1302,99 @@ const RecordFixtureModal: React.FC<{
 };
 
 // ---------------- Schedule Generator (round-robin, inline) ----------------
+// ---------------- Fixture Chat ----------------
+const FixtureChatModal: React.FC<{ tour: Tournament; fixtureId: string; label: string; currentUser: Me | null; api: any; onClose: () => void }> = ({ tour, fixtureId, label, currentUser, api, onClose }) => {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.listFixtureMessages(tour.id, fixtureId);
+      setMessages(r.items);
+    } catch (e: any) {
+      setError(e?.message || 'Could not load messages.');
+    } finally {
+      setLoading(false);
+    }
+  }, [tour.id, fixtureId]);
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 4000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length]);
+
+  const send = async () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api.postFixtureMessage(tour.id, fixtureId, trimmed);
+      setText('');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Could not send message.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white border border-light-border rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between p-4 border-b border-light-border">
+          <div>
+            <h3 className="font-display font-bold text-sm text-charcoal">Match Chat</h3>
+            <p className="text-[10px] text-slate-gray font-mono">{label}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-gray hover:text-charcoal cursor-pointer">&times;</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+          {loading ? (
+            <p className="text-xs text-slate-gray font-mono text-center py-6">Loading messages...</p>
+          ) : messages.length === 0 ? (
+            <p className="text-xs text-slate-gray text-center py-6">No messages yet — say hi and sort out your match time.</p>
+          ) : messages.map((m) => {
+            const mine = m.senderSub === currentUser?.userSub;
+            return (
+              <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[75%] rounded-xl px-3 py-2 ${mine ? 'bg-court-green text-white' : 'bg-off-white border border-light-border text-charcoal'}`}>
+                  {!mine && <span className="text-[9px] font-mono font-bold text-court-green block mb-0.5">{m.senderName}</span>}
+                  <span className="text-xs">{m.text}</span>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={bottomRef} />
+        </div>
+
+        {error && <p className="text-[10px] text-red-600 font-semibold px-4 pb-1">{error}</p>}
+
+        <div className="p-3 border-t border-light-border flex gap-2">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } }}
+            placeholder="Message about this match..."
+            className="flex-1 text-xs bg-off-white border border-light-border rounded-xl px-3 py-2.5"
+          />
+          <button onClick={send} disabled={sending || !text.trim()} className="w-10 h-10 rounded-xl bg-court-green hover:bg-[#235F3A] text-white flex items-center justify-center cursor-pointer disabled:opacity-50 shrink-0">
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: any; onGenerated: () => void }> = ({ tour, periodLabel, api, onGenerated }) => {
   const teams = tour.teams || [];
   const allPlayers = teams.flatMap((t) => t.players);
@@ -1333,10 +1456,10 @@ const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: 
     const teamRounds = circleMethod(teams.map((t) => t.id));
     if (teamRounds.length === 0) { setError('Could not generate fixtures.'); return; }
 
-    let rounds: { teamAId: string; teamBId: string; teamAPlayers: RosterPlayer[]; teamBPlayers: RosterPlayer[] }[][];
+    let rounds: { fixtureId: string; teamAId: string; teamBId: string; teamAPlayers: RosterPlayer[]; teamBPlayers: RosterPlayer[] }[][];
 
     if (pairBy === 'teams') {
-      rounds = teamRounds.map((pairs) => pairs.map(([a, b]) => ({ teamAId: a, teamBId: b, teamAPlayers: [], teamBPlayers: [] })));
+      rounds = teamRounds.map((pairs) => pairs.map(([a, b]) => ({ fixtureId: crypto.randomUUID(), teamAId: a, teamBId: b, teamAPlayers: [], teamBPlayers: [] })));
     } else {
       const byId = new Map(teams.map((t) => [t.id, t]));
       rounds = teamRounds.map((pairs) =>
@@ -1350,9 +1473,9 @@ const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: 
           const rosterA = [...teamA.players].sort(() => Math.random() - 0.5);
           const rosterB = [...teamB.players].sort(() => Math.random() - 0.5);
           const slots = Math.min(rosterA.length, rosterB.length);
-          const games: { teamAId: string; teamBId: string; teamAPlayers: RosterPlayer[]; teamBPlayers: RosterPlayer[] }[] = [];
+          const games: { fixtureId: string; teamAId: string; teamBId: string; teamAPlayers: RosterPlayer[]; teamBPlayers: RosterPlayer[] }[] = [];
           for (let i = 0; i < slots; i++) {
-            games.push({ teamAId: aId, teamBId: bId, teamAPlayers: [rosterA[i]], teamBPlayers: [rosterB[i]] });
+            games.push({ fixtureId: crypto.randomUUID(), teamAId: aId, teamBId: bId, teamAPlayers: [rosterA[i]], teamBPlayers: [rosterB[i]] });
           }
           return games;
         })

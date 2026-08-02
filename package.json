@@ -1,50 +1,31 @@
 {
-  "name": "paddlehubs-site",
+  "name": "paddlehubs",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
-    "lint": "eslint .",
     "preview": "vite preview",
-    "cap:sync": "vite build && npx cap sync",
-    "cap:ios": "vite build && npx cap sync ios && npx cap open ios",
-    "cap:android": "vite build && npx cap sync android && npx cap open android"
+    "clean": "rm -rf dist server.js",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.966.0",
-    "@aws-sdk/client-dynamodb": "^3.966.0",
-    "@aws-sdk/lib-dynamodb": "^3.966.0",
-    "@capacitor/android": "^7.0.0",
-    "@capacitor/app": "^7.0.0",
-    "@capacitor/browser": "^7.0.0",
-    "@capacitor/core": "^7.0.0",
-    "@capacitor/ios": "^7.0.0",
-    "jspdf": "^4.0.0",
-    "jspdf-autotable": "^5.0.2",
-    "jwt-decode": "^4.0.0",
-    "lucide-react": "^0.562.0",
-    "oidc-client-ts": "^3.4.1",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-oidc-context": "^3.3.0",
-    "react-router-dom": "^7.11.0",
-    "qrcode": "^1.5.4"
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^6.2.3"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.0.0",
-    "@eslint/js": "^9.39.1",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "autoprefixer": "^10.4.23",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.19",
-    "vite": "^7.2.4"
-  }
+    "@types/node": "^22.14.0",
+    "autoprefixer": "^10.4.21",
+    "tailwindcss": "^4.1.14",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
+  },
+  "author": "Sai Sidharth",
+  "description": "PaddleHubs \u2014 an open-source pickleball tournament management platform."
 }

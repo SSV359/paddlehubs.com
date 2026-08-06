@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import { useAppState } from '../AppContext';
 import type { TeamStandingRow } from '../types';
 import { Trophy, Users, User, ArrowUpRight, Award, Medal, Zap, Sparkles, Flame, Share2 } from 'lucide-react';
@@ -240,7 +241,7 @@ export const LeaderboardView: React.FC = () => {
                       {/* Player Name */}
                       <td className="py-4 px-6">
                         <button
-                          onClick={() => navigateTo('profile', p.email || p.player)}
+                          onClick={() => navigateTo('profile', encodeProfileId(p.email, p.player))}
                           className="flex items-center gap-3 hover:text-court-green group/pbtn transition-colors text-left cursor-pointer"
                         >
                           <img

@@ -9,7 +9,13 @@ import { PaddleHubsLogo } from './PaddleHubsLogo';
 import {
   LayoutDashboard,
   Trophy,
+  Radio,
   Award,
+  MessageCircle,
+  Video,
+  DollarSign,
+  ShoppingBag,
+  UserPlus,
   CalendarDays,
   User,
   ShieldCheck,
@@ -37,9 +43,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen, onLogout })
 
   const menuItems = [
     { id: 'dashboard' as ActiveView, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'live-matches' as ActiveView, label: 'Live Matches', icon: Radio },
+    { id: 'pairing-wheel' as ActiveView, label: 'Pairing Wheel', icon: Sparkles },
     { id: 'leaderboard' as ActiveView, label: 'Leaderboard', icon: Trophy },
     { id: 'player-rankings' as ActiveView, label: 'Player Rankings', icon: Award },
     { id: 'player-performance' as ActiveView, label: 'Performance Lab', icon: Activity },
+    { id: 'club-chat' as ActiveView, label: 'Club Chat', icon: MessageCircle },
+    { id: 'video-library' as ActiveView, label: 'Virtual AI Coach', icon: Video },
+    { id: 'club-expenses' as ActiveView, label: 'Split Costs', icon: DollarSign },
+    { id: 'marketplace' as ActiveView, label: 'Marketplace', icon: ShoppingBag },
+    { id: 'player-directory' as ActiveView, label: 'Player Directory', icon: Users },
+    { id: 'need-a-sub' as ActiveView, label: 'Need a Sub', icon: UserPlus },
     { id: 'tournaments' as ActiveView, label: 'Tournaments', icon: Activity },
     { id: 'schedule' as ActiveView, label: 'Schedule', icon: CalendarDays },
     { id: 'bookings' as ActiveView, label: 'Court Bookings', icon: Calendar },
@@ -178,6 +192,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen, onLogout })
                 { id: 'courtEnergy' as const, label: 'Court', a: '#1E7A4C', b: '#F2B705' },
                 { id: 'editorial' as const, label: 'Editorial', a: '#7A2E2E', b: '#B8892B' },
                 { id: 'clay' as const, label: 'Clay', a: '#C1502E', b: '#2D9C8F' },
+                { id: 'hardwood' as const, label: 'Hardwood', a: '#D97B1F', b: '#E8B84B' },
+                { id: 'wimbledon' as const, label: 'Grand Slam', a: '#2F5233', b: '#6B3FA0' },
+                { id: 'neon' as const, label: 'Neon Arena', a: '#00D9C0', b: '#FF3EA5' },
               ]
             ).map((t) => (
               <button

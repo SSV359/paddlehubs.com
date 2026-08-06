@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&family=Orbitron:wght@700;800;900&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Anton&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&family=Orbitron:wght@700;800;900&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Anton&family=Oswald:wght@500;600;700&family=Playfair+Display:wght@600;700;800&family=Audiowide&display=swap');
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
@@ -49,6 +49,30 @@
   --color-deep-navy: #1B1410;
   --color-court-green: #C1502E;
   --color-soft-gold: #2D9C8F;
+}
+.theme-hardwood {
+  /* Basketball — warm hardwood-court amber, black accent, bold
+     condensed athletic type. */
+  --font-display: "Oswald", sans-serif;
+  --color-deep-navy: #1A1005;
+  --color-court-green: #D97B1F;
+  --color-soft-gold: #E8B84B;
+}
+.theme-wimbledon {
+  /* Tennis — the classic deep-green-and-purple pairing, elegant serif
+     type for a championship feel. */
+  --font-display: "Playfair Display", serif;
+  --color-deep-navy: #0E1A12;
+  --color-court-green: #2F5233;
+  --color-soft-gold: #6B3FA0;
+}
+.theme-neon {
+  /* Night-game / arena energy — near-black with a hot cyan/magenta
+     pairing, futuristic type. The boldest, least traditional option. */
+  --font-display: "Audiowide", sans-serif;
+  --color-deep-navy: #05070F;
+  --color-court-green: #00D9C0;
+  --color-soft-gold: #FF3EA5;
 }
 
 .dark {
@@ -236,6 +260,15 @@
 }
 .animate-live-pulse {
   animation: livePulse 1.6s ease-in-out infinite;
+}
+
+/* Native app safe areas (notch, home indicator, Android status bar) —
+   no-ops on web since these env() vars are 0 in a browser. */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 @keyframes rankCardIn {

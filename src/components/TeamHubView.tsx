@@ -4,9 +4,10 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import { NetDivider } from './NetDivider';
 import { useAppState } from '../AppContext';
-import type { TeamStandingRow, TournamentMatch, Tournament, TournamentTeam } from '../types';
+import type { TeamStandingRow, TournamentMatch, Tournament, TournamentTeam, PublicPlayerProfile, PlayerRankingRow } from '../types';
 import {
   ArrowLeft,
   Users,
@@ -46,6 +47,7 @@ export const TeamHubView: React.FC = () => {
 
   const [standing, setStanding] = useState<TeamStandingRow | null>(null);
   const [teamMatches, setTeamMatches] = useState<TournamentMatch[]>([]);
+  const [tourRankings, setTourRankings] = useState<PlayerRankingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -54,9 +56,11 @@ export const TeamHubView: React.FC = () => {
     Promise.all([
       api.getTeamStandings(tournament.id),
       api.listTournamentMatches(tournament.id),
-    ]).then(([standingsRes, matchesRes]) => {
+      api.getTournamentPlayerRankings(tournament.id),
+    ]).then(([standingsRes, matchesRes, rankingsRes]) => {
       setStanding(standingsRes.standings.find((s) => s.teamId === team!.id) || null);
       setTeamMatches(matchesRes.items.filter((m) => m.teamAId === team!.id || m.teamBId === team!.id && m.winnerTeamId));
+      setTourRankings(rankingsRes.standings);
     }).catch((e) => console.error(e)).finally(() => setLoading(false));
   }, [tournament?.id, team?.id]);
 
@@ -78,10 +82,46 @@ export const TeamHubView: React.FC = () => {
   // legacy roster entries with no email on record.
   const matchRow = (player: { name: string; email: string }) =>
     playerRankings.find((p) => (p.email && player.email ? norm(p.email) === norm(player.email) : norm(p.player) === norm(player.name)));
+
+  // Wins/losses/matches/streak must be scoped to THIS tournament only —
+  // a player's career-wide record (from the global playerRankings above)
+  // was leaking into every tournament they'd been added to, showing
+  // matches from other tournaments as if they'd been played here. DUPR
+  // and avatar stay sourced from the global lookup above since those are
+  // genuinely account-wide, not tournament-specific.
+  const matchTourRow = (player: { name: string; email: string }) =>
+    tourRankings.find((p) => (p.email && player.email ? norm(p.email) === norm(player.email) : norm(p.player) === norm(player.name)));
+
+  // Player Rankings only exists for players who've played a recorded
+  // match — teammates with zero matches have no rankings row at all, so
+  // their real photo/DUPR (which already exists on their account) never
+  // shows up here otherwise. Look those specific players up directly.
+  const [directProfiles, setDirectProfiles] = useState<Record<string, PublicPlayerProfile>>({});
+  useEffect(() => {
+    const needsLookup = team!.players.filter((p) => {
+      const row = matchRow(p);
+      return p.email && !(row?.avatarDataUrl && row?.duprRating != null);
+    });
+    if (needsLookup.length === 0) return;
+    Promise.all(
+      needsLookup.map((p) => api.getPlayerProfileByEmail(p.email).then((r) => [p.email, r] as const).catch(() => null))
+    ).then((results) => {
+      const map: Record<string, PublicPlayerProfile> = {};
+      for (const r of results) {
+        if (r && !('error' in r[1])) map[r[0]] = r[1];
+      }
+      setDirectProfiles(map);
+    });
+  }, [team!.id]);
+
+  const resolveAvatar = (email: string, row: ReturnType<typeof matchRow>) => directProfiles[email]?.avatarDataUrl || row?.avatarDataUrl || '';
+  const resolveDupr = (email: string, row: ReturnType<typeof matchRow>) => directProfiles[email]?.duprRating ?? row?.duprRating ?? null;
+
   const rosterRows = team.players.map((player) => ({
     name: player.name,
     email: player.email,
     row: matchRow(player),
+    tourRow: matchTourRow(player),
   }));
   const captainPlayer = team.players.find((p) => (p.email || p.name) === team!.captain);
   const captainName = captainPlayer?.name || team!.captain;
@@ -175,12 +215,12 @@ export const TeamHubView: React.FC = () => {
             
             {team.captain ? (
               <div 
-                onClick={() => navigateTo('profile', captainPlayer?.email || team!.captain)}
+                onClick={() => navigateTo('profile', encodeProfileId(captainPlayer?.email, captainName))}
                 className="bg-off-white hover:bg-white border border-light-border p-4 rounded-xl flex items-center justify-between transition-all cursor-pointer group"
               >
                 <div className="flex items-center gap-3">
                   <img
-                    src={captainRow?.avatarDataUrl || defaultAvatar(captainName)}
+                    src={resolveAvatar(captainPlayer?.email || '', captainRow) || defaultAvatar(captainName)}
                     alt={captainName}
                     className="w-10 h-10 rounded-lg object-cover border border-light-border shadow-sm"
                     referrerPolicy="no-referrer"
@@ -191,7 +231,7 @@ export const TeamHubView: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <span className="text-[9px] text-slate-gray font-mono uppercase block">DUPR</span>
-                  <span className="text-xs font-mono font-bold text-court-green">{captainRow?.duprRating != null ? captainRow.duprRating.toFixed(2) : '—'}</span>
+                  <span className="text-xs font-mono font-bold text-court-green">{(() => { const d = resolveDupr(captainPlayer?.email || '', captainRow); return d != null ? d.toFixed(2) : '—'; })()}</span>
                 </div>
               </div>
             ) : (
@@ -209,12 +249,12 @@ export const TeamHubView: React.FC = () => {
               {rosterRows.map(({ name, email, row }) => (
                 <div
                   key={email || name}
-                  onClick={() => navigateTo('profile', email || name)}
+                  onClick={() => navigateTo('profile', encodeProfileId(email, name))}
                   className="bg-off-white hover:bg-white p-3 rounded-lg flex items-center justify-between border border-light-border transition-all cursor-pointer group"
                 >
                   <div className="flex items-center gap-2.5">
                     <img
-                      src={row?.avatarDataUrl || defaultAvatar(name)}
+                      src={resolveAvatar(email, row) || defaultAvatar(name)}
                       alt={name}
                       className="w-8 h-8 rounded-lg object-cover border border-light-border"
                       referrerPolicy="no-referrer"
@@ -223,7 +263,7 @@ export const TeamHubView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-mono text-slate-gray font-bold">DUPR: {row?.duprRating != null ? row.duprRating.toFixed(2) : '—'}</span>
+                    <span className="text-[10px] font-mono text-slate-gray font-bold">DUPR: {(() => { const d = resolveDupr(email, row); return d != null ? d.toFixed(2) : '—'; })()}</span>
                     <ArrowUpRight className="w-3.5 h-3.5 text-slate-gray/60 group-hover:text-court-green transition-colors" />
                   </div>
                 </div>
@@ -262,15 +302,15 @@ export const TeamHubView: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           
           {/* Contribution Rankings */}
-          <div className="bg-white border border-light-border rounded-2xl overflow-hidden shadow-sm">
-            <div className="bg-[#F8FAF7] p-4 border-b border-light-border">
-              <h3 className="font-bold text-sm text-slate-gray font-mono uppercase tracking-wider">Player Contribution Standings</h3>
+          <div className="bg-white dark:bg-[#0E1726] border border-light-border dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            <div className="bg-gradient-to-r from-court-green/15 via-court-green/5 to-transparent dark:from-court-green/20 dark:via-court-green/5 dark:to-transparent p-4 border-b border-court-green/20 dark:border-court-green/20">
+              <h3 className="font-bold text-sm text-court-green font-mono uppercase tracking-wider">Player Contribution Standings</h3>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="bg-[#F8FAF7]/50 border-b border-light-border font-mono text-[10px] tracking-wider text-slate-gray uppercase">
+                  <tr className="bg-off-white dark:bg-slate-900/60 border-b border-light-border dark:border-slate-800 font-mono text-[10px] tracking-wider text-slate-gray dark:text-slate-300 uppercase">
                     <th className="py-4 px-5">Player Name</th>
                     <th className="py-4 px-5 text-center">Matches</th>
                     <th className="py-4 px-5 text-center">Wins</th>
@@ -279,29 +319,33 @@ export const TeamHubView: React.FC = () => {
                     <th className="py-4 px-5 text-center">Streak</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
-                  {rosterRows.map(({ name, email, row }) => {
-                    const wins = row?.wins ?? 0;
-                    const losses = row?.losses ?? 0;
-                    const played = row?.played ?? 0;
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                  {rosterRows.map(({ name, email, row, tourRow }) => {
+                    // Wins/losses/played/streak here are scoped to THIS
+                    // tournament (tourRow) — not the player's career-wide
+                    // totals (row), which would otherwise show matches
+                    // from every other tournament they've ever played.
+                    const wins = tourRow?.wins ?? 0;
+                    const losses = tourRow?.losses ?? 0;
+                    const played = tourRow?.played ?? 0;
                     const winRate = played > 0 ? Math.round((wins / played) * 100) : 0;
                     return (
-                      <tr key={email || name} className="hover:bg-off-white/50 transition-all">
+                      <tr key={email || name} className="hover:bg-off-white/50 dark:hover:bg-slate-900/40 transition-all">
                         <td className="py-3 px-5">
                           <button
-                            onClick={() => navigateTo('profile', email || name)}
-                            className="font-bold text-charcoal hover:text-court-green flex items-center gap-1.5 text-left transition-colors cursor-pointer"
+                            onClick={() => navigateTo('profile', encodeProfileId(email, name))}
+                            className="font-bold text-charcoal dark:text-white hover:text-court-green flex items-center gap-1.5 text-left transition-colors cursor-pointer"
                           >
                             <span>{name}</span>
                             <ArrowUpRight className="w-3 h-3 text-slate-gray/60" />
                           </button>
                         </td>
-                        <td className="py-3 px-5 text-center font-mono font-semibold text-slate-gray">{played}</td>
-                        <td className="py-3 px-5 text-center font-mono font-bold text-charcoal">{wins}</td>
-                        <td className="py-3 px-5 text-center font-mono font-semibold text-slate-gray/60">{losses}</td>
+                        <td className="py-3 px-5 text-center font-mono font-semibold text-slate-gray dark:text-slate-400">{played}</td>
+                        <td className="py-3 px-5 text-center font-mono font-bold text-charcoal dark:text-white">{wins}</td>
+                        <td className="py-3 px-5 text-center font-mono font-semibold text-slate-gray/60 dark:text-slate-500">{losses}</td>
                         <td className="py-3 px-5 text-center font-mono font-bold text-court-green">{winRate}%</td>
-                        <td className="py-3 px-5 text-center font-mono text-slate-gray">
-                          <span className="font-bold text-charcoal">{row?.streak ?? 0}</span> game(s)
+                        <td className="py-3 px-5 text-center font-mono text-slate-gray dark:text-slate-400">
+                          <span className="font-bold text-charcoal dark:text-white">{tourRow?.streak ?? 0}</span> game(s)
                         </td>
                       </tr>
                     );

@@ -4,6 +4,7 @@
  */
 
 import React, { useRef, useState } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import type { PlayerRankingRow } from '../types';
 import { defaultAvatar } from '../utils/avatar';
 import { ChevronLeft, ChevronRight, ArrowUpRight } from 'lucide-react';
@@ -70,7 +71,7 @@ export const TopRankedPlayersRail: React.FC<{ rankings: PlayerRankingRow[]; navi
             return (
               <button
                 key={p.email || p.player}
-                onClick={() => navigateTo('profile', p.email || p.player)}
+                onClick={() => navigateTo('profile', encodeProfileId(p.email, p.player))}
                 className="group relative flex flex-col items-center shrink-0 w-[200px] snap-start cursor-pointer text-left animate-rank-card-in"
                 style={{ animationDelay: `${idx * 60}ms` }}
               >

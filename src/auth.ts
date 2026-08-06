@@ -127,56 +127,93 @@ export async function getIdToken(): Promise<string | null> {
 }
 
 // ---------- Redirect-based flows ----------
+// On the web, Cognito redirects the whole browser tab back to
+// https://paddlehubs.com/auth/callback. Inside a Capacitor-wrapped
+// native app, there is no "browser tab" to return to — the flow instead
+// opens Cognito's Hosted UI in an in-app browser (SFSafariViewController
+// on iOS, Chrome Custom Tabs on Android) and Cognito redirects to a
+// custom URL scheme (com.paddlehubs.app://auth/callback) that the OS
+// hands back to this app directly. Both redirect_uris must be
+// registered as "Allowed callback URLs" on the same Cognito App Client.
+const NATIVE_REDIRECT_URI = 'com.paddlehubs.app://auth/callback';
+const NATIVE_LOGOUT_URI = 'com.paddlehubs.app://auth/logout';
+
+async function isNative(): Promise<boolean> {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    return Capacitor.isNativePlatform();
+  } catch {
+    return false; // @capacitor/core not installed/bundled — plain web build
+  }
+}
+
+function redirectUriFor(native: boolean) {
+  return native ? NATIVE_REDIRECT_URI : CONFIG.cognitoRedirectUri;
+}
+
 async function redirectToHostedUi(path: 'login' | 'signup' | 'forgotPassword') {
   const verifier = randomVerifier();
   const challenge = await codeChallengeFor(verifier);
   sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+  const native = await isNative();
 
   const params = new URLSearchParams({
     client_id: CONFIG.cognitoClientId,
     response_type: 'code',
     scope: 'openid email profile',
-    redirect_uri: CONFIG.cognitoRedirectUri,
+    redirect_uri: redirectUriFor(native),
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
-  window.location.href = `${CONFIG.cognitoDomain}/${path}?${params.toString()}`;
+  const url = `${CONFIG.cognitoDomain}/${path}?${params.toString()}`;
+
+  if (native) {
+    const { Browser } = await import('@capacitor/browser');
+    await Browser.open({ url });
+  } else {
+    window.location.href = url;
+  }
 }
 
-/** Redirects the browser to Cognito's Hosted UI login page. */
+/** Redirects to Cognito's Hosted UI login page (in-app browser on native). */
 export function signIn(): void {
   redirectToHostedUi('login');
 }
 
-/** Redirects the browser to Cognito's Hosted UI sign-up page. */
+/** Redirects to Cognito's Hosted UI sign-up page (in-app browser on native). */
 export function signUp(): void {
   redirectToHostedUi('signup');
 }
 
-/** Redirects the browser to Cognito's Hosted UI forgot-password page. */
+/** Redirects to Cognito's Hosted UI forgot-password page (in-app browser on native). */
 export function forgotPassword(): void {
   redirectToHostedUi('forgotPassword');
 }
 
-export function signOut(): void {
+export async function signOut(): Promise<void> {
   clearStoredTokens();
+  const native = await isNative();
   const params = new URLSearchParams({
     client_id: CONFIG.cognitoClientId,
-    logout_uri: CONFIG.cognitoLogoutUri,
+    logout_uri: native ? NATIVE_LOGOUT_URI : CONFIG.cognitoLogoutUri,
   });
-  window.location.href = `${CONFIG.cognitoDomain}/logout?${params.toString()}`;
+  const url = `${CONFIG.cognitoDomain}/logout?${params.toString()}`;
+
+  if (native) {
+    const { Browser } = await import('@capacitor/browser');
+    await Browser.open({ url });
+  } else {
+    window.location.href = url;
+  }
 }
 
 /**
- * Call this once, on load, at the /auth/callback route. Exchanges the
- * `code` query param for tokens using the PKCE verifier stashed before
- * redirecting out. Returns true if a session was established.
+ * Exchanges an authorization `code` for tokens. Shared by both the web
+ * callback route and the native deep-link handler below — only the
+ * redirect_uri sent to the token endpoint differs, and it must exactly
+ * match whichever one was used to obtain the code.
  */
-export async function handleAuthCallback(): Promise<boolean> {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  if (!code) return false;
-
+async function exchangeCodeForTokens(code: string, redirectUri: string): Promise<boolean> {
   const verifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
   if (!verifier) return false;
 
@@ -184,7 +221,7 @@ export async function handleAuthCallback(): Promise<boolean> {
     grant_type: 'authorization_code',
     client_id: CONFIG.cognitoClientId,
     code,
-    redirect_uri: CONFIG.cognitoRedirectUri,
+    redirect_uri: redirectUri,
     code_verifier: verifier,
   });
 
@@ -206,4 +243,28 @@ export async function handleAuthCallback(): Promise<boolean> {
     obtained_at: Date.now(),
   });
   return true;
+}
+
+/**
+ * Call this once, on load, at the /auth/callback route (web only).
+ * Returns true if a session was established.
+ */
+export async function handleAuthCallback(): Promise<boolean> {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (!code) return false;
+  return exchangeCodeForTokens(code, CONFIG.cognitoRedirectUri);
+}
+
+/**
+ * Native counterpart to handleAuthCallback — call this from the
+ * Capacitor `appUrlOpen` listener (wired up in App.tsx) with the full
+ * deep-link URL the OS handed back, e.g.
+ * "com.paddlehubs.app://auth/callback?code=...".
+ */
+export async function handleNativeAuthCallback(url: string): Promise<boolean> {
+  const parsed = new URL(url);
+  const code = parsed.searchParams.get('code');
+  if (!code) return false;
+  return exchangeCodeForTokens(code, NATIVE_REDIRECT_URI);
 }

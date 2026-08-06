@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import { useAppState } from '../AppContext';
 import type { RegisteredUser } from '../types';
 import { 
@@ -257,7 +258,7 @@ export const RegisteredUsersView: React.FC = () => {
                       <td className="py-4 px-6 text-center">
                         {user.displayName ? (
                           <button
-                            onClick={() => navigateTo('profile', user.email || user.displayName)}
+                            onClick={() => navigateTo('profile', encodeProfileId(user.email, user.displayName))}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-bold font-mono tracking-wider border border-light-border dark:border-slate-800 hover:border-court-green hover:text-court-green dark:hover:border-court-green rounded-lg transition-all cursor-pointer bg-white dark:bg-slate-900 hover:shadow-sm"
                           >
                             <span>VIEW PROFILE</span>

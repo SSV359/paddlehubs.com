@@ -29,13 +29,21 @@ import type {
   SiteAnalytics,
 } from './types';
 
-export type ColorTheme = 'courtEnergy' | 'editorial' | 'clay';
+export type ColorTheme = 'courtEnergy' | 'editorial' | 'clay' | 'hardwood' | 'wimbledon' | 'neon';
 
 export type ActiveView =
   | 'dashboard'
   | 'leaderboard'
   | 'player-rankings'
   | 'player-performance'
+  | 'club-chat'
+  | 'video-library'
+  | 'club-expenses'
+  | 'marketplace'
+  | 'player-directory'
+  | 'need-a-sub'
+  | 'live-matches'
+  | 'pairing-wheel'
   | 'tournaments'
   | 'schedule'
   | 'profile'
@@ -143,9 +151,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // colors and display font change between these; backgrounds/text
   // still follow light/dark independently, so any theme works in
   // either mode without a combinatorial mess of special cases.
+  const ALL_THEMES: ColorTheme[] = ['courtEnergy', 'editorial', 'clay', 'hardwood', 'wimbledon', 'neon'];
   const [colorTheme, setColorThemeState] = useState<ColorTheme>(() => {
-    const saved = localStorage.getItem('ph_color_theme');
-    return saved === 'editorial' || saved === 'clay' || saved === 'courtEnergy' ? saved : 'courtEnergy';
+    const saved = localStorage.getItem('ph_color_theme') as ColorTheme | null;
+    return saved && ALL_THEMES.includes(saved) ? saved : 'courtEnergy';
   });
 
   useEffect(() => {
@@ -155,9 +164,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     localStorage.setItem('ph_color_theme', colorTheme);
-    document.documentElement.classList.remove('theme-editorial', 'theme-clay');
-    if (colorTheme === 'editorial') document.documentElement.classList.add('theme-editorial');
-    else if (colorTheme === 'clay') document.documentElement.classList.add('theme-clay');
+    document.documentElement.classList.remove('theme-editorial', 'theme-clay', 'theme-hardwood', 'theme-wimbledon', 'theme-neon');
+    if (colorTheme !== 'courtEnergy') document.documentElement.classList.add(`theme-${colorTheme}`);
   }, [colorTheme]);
 
   const toggleTheme = () => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
@@ -186,12 +194,57 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setAuthLoading(true);
       if (window.location.pathname === '/auth/callback') {
         await authApi.handleAuthCallback();
-        // Clean the ?code=... off the URL without a full reload.
         window.history.replaceState({}, '', '/');
       }
       await refreshCurrentUser();
       setAuthLoading(false);
+
+      const checkinId = new URLSearchParams(window.location.search).get('checkin');
+      if (checkinId) {
+        window.history.replaceState({}, '', '/');
+        const session = await authApi.getCurrentSession();
+        if (session) {
+          try {
+            await api.checkInToTournament(checkinId);
+          } catch (e) {
+            console.error('Check-in failed:', e);
+          }
+        }
+        setActiveTournamentId(checkinId);
+        setCurrentView('tournament-hub');
+      }
     })();
+  }, [refreshCurrentUser]);
+
+  // Native-only: Cognito redirects back into the app via a custom URL
+  // scheme (com.paddlehubs.app://auth/callback) instead of a web route.
+  // The OS hands that whole URL to Capacitor's "appUrlOpen" event, which
+  // this listens for. No-ops entirely on web (isNative() check inside
+  // auth.ts's handleNativeAuthCallback short-circuits if @capacitor/core
+  // isn't running natively).
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    (async () => {
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        if (!Capacitor.isNativePlatform()) return;
+        const { App: CapApp } = await import('@capacitor/app');
+        const { Browser } = await import('@capacitor/browser');
+        const listener = await CapApp.addListener('appUrlOpen', async ({ url }) => {
+          if (url.startsWith('com.paddlehubs.app://auth/callback')) {
+            await authApi.handleNativeAuthCallback(url);
+            await Browser.close().catch(() => {});
+            await refreshCurrentUser();
+          } else if (url.startsWith('com.paddlehubs.app://auth/logout')) {
+            await Browser.close().catch(() => {});
+          }
+        });
+        cleanup = () => listener.remove();
+      } catch {
+        // @capacitor/core not present — plain web build, nothing to do.
+      }
+    })();
+    return () => cleanup?.();
   }, [refreshCurrentUser]);
 
   // These redirect the whole browser to Cognito's Hosted UI — there's no

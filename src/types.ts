@@ -9,6 +9,7 @@ export interface Me {
   avatarDataUrl?: string;
   avatarColor?: string;
   gender?: 'male' | 'female' | '';
+  zelleContact?: string;
   createdAt: string;
   updatedAt: string;
   lastActiveAt?: string;
@@ -142,6 +143,25 @@ export interface Playoffs {
   generatedAt: string;
 }
 
+export interface LiveMatch {
+  tournamentId: string;
+  fixtureId: string;
+  teamAId: string;
+  teamBId: string;
+  teamAName: string;
+  teamBName: string;
+  teamAPlayers: RosterPlayer[];
+  teamBPlayers: RosterPlayer[];
+  court: string;
+  gameType: GameType;
+  games: { a: number; b: number }[];
+  liveA: number;
+  liveB: number;
+  startedBySub: string;
+  startedByName: string;
+  updatedAt: string;
+}
+
 export interface ScheduleFixture {
   fixtureId: string; // stable identity for this fixture — chat threads and reminders key off this, not array position
   teamAId: string;
@@ -164,6 +184,14 @@ export interface FixtureMessage {
   createdAt: string;
 }
 
+export interface ClubChatMessage {
+  id: string;
+  senderSub: string;
+  senderName: string;
+  text: string;
+  createdAt: string;
+}
+
 export interface ScheduleWeek {
   week: number;
   date: string;
@@ -180,6 +208,7 @@ export interface Tournament {
   id: string;
   type: 'TOURNAMENT';
   name: string;
+  checkedIn?: Record<string, string>;
   startDate: string;
   endDate: string;
   registrationStartDate: string;
@@ -242,6 +271,77 @@ export interface DreamBreaker {
 }
 
 /** Match recorded within a specific tournament (as opposed to a ClubMatch) */
+export type ExpenseCategory = 'food' | 'balls' | 'court' | 'travel' | 'apparel' | 'prizes' | 'other';
+
+export type PaddleCondition = 'new' | 'like_new' | 'good' | 'fair' | 'well_loved';
+
+export interface SubRequest {
+  id: string;
+  requesterSub: string;
+  requesterName: string;
+  requesterEmail: string;
+  tournamentId: string;
+  tournamentName: string;
+  date: string;
+  message: string;
+  status: 'open' | 'filled';
+  filledBySub?: string;
+  filledByName?: string;
+  createdAt: string;
+}
+
+export interface AppNotification {
+  id: string;
+  notifType: string;
+  title: string;
+  body: string;
+  link: { view: string; id?: string; tab?: string } | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface MarketplaceListing {
+  id: string;
+  sellerSub: string;
+  sellerName: string;
+  sellerEmail: string;
+  title: string;
+  brand: string;
+  condition: PaddleCondition;
+  price: number;
+  description: string;
+  photoDataUrl?: string;
+  status: 'available' | 'sold';
+  createdAt: string;
+}
+
+export interface TournamentExpense {
+  id: string;
+  tournamentId: string;
+  description: string;
+  category: ExpenseCategory;
+  amount: number;
+  paidByEmail: string;
+  paidByName: string;
+  splitAmong: RosterPlayer[]; // who shares this cost, equally
+  createdBySub: string;
+  createdAt: string;
+}
+
+export interface VideoRecord {
+  id: string;
+  ownerSub: string;
+  ownerDisplayName: string;
+  title: string;
+  tournamentId?: string;
+  matchLabel?: string;
+  s3Key: string;
+  aiStatus: 'pending' | 'done' | 'failed' | 'skipped';
+  aiCommentary?: string;
+  videoDeleted?: boolean;
+  createdAt: string;
+}
+
 export interface TournamentMatch {
   id: string;
   type: 'TMATCH';
@@ -330,4 +430,18 @@ export interface SiteAnalytics {
   uniqueVisitors: number;
   topPages: { path: string; views: number }[];
   daily: { date: string; views: number }[];
+}
+
+/** Direct account lookup — works even for players with zero recorded
+ * matches, unlike PlayerRankingRow which only exists once someone has
+ * played. */
+export interface PublicPlayerProfile {
+  displayName: string;
+  duprId?: string;
+  duprRating?: number | null;
+  avatarDataUrl?: string;
+  avatarColor?: string;
+  gender?: string;
+  zelleContact?: string;
+  online?: boolean;
 }

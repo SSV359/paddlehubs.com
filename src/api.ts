@@ -19,6 +19,16 @@ import type {
   StandingsOverride,
   RosterPlayer,
   FixtureMessage,
+  PublicPlayerProfile,
+  ClubChatMessage,
+  VideoRecord,
+  TournamentExpense,
+  ExpenseCategory,
+  MarketplaceListing,
+  PaddleCondition,
+  AppNotification,
+  SubRequest,
+  LiveMatch,
 } from './types';
 
 export class ApiError extends Error {
@@ -182,6 +192,100 @@ export const listFixtureMessages = (tournamentId: string, fixtureId: string) =>
 export const postFixtureMessage = (tournamentId: string, fixtureId: string, text: string) =>
   request<FixtureMessage>('POST', `/tournaments/${tournamentId}/fixtures/${fixtureId}/messages`, { text });
 
+// Live scoreboard — an ephemeral scratch pad while a match is actively
+// being played. "Finish" folds the accumulated games into a real match
+// via createTournamentMatch (below), same as any other match entry.
+export const listAllLiveMatches = () =>
+  request<{ items: LiveMatch[] }>('GET', '/live', undefined, { auth: false });
+export const listLiveMatches = (tournamentId: string) =>
+  request<{ items: LiveMatch[] }>('GET', `/tournaments/${tournamentId}/live`);
+export const getLiveMatch = (tournamentId: string, fixtureId: string) =>
+  request<LiveMatch | { active: false }>('GET', `/tournaments/${tournamentId}/live/${fixtureId}`);
+export const startLiveMatch = (tournamentId: string, fixtureId: string, input: { teamAId: string; teamBId: string; court: string; gameType: string }) =>
+  request<LiveMatch>('POST', `/tournaments/${tournamentId}/live/${fixtureId}/start`, input);
+export const updateLiveMatch = (tournamentId: string, fixtureId: string, action: string) =>
+  request<LiveMatch>('POST', `/tournaments/${tournamentId}/live/${fixtureId}/update`, { action });
+export const endLiveMatch = (tournamentId: string, fixtureId: string) =>
+  request<{ ok: true }>('DELETE', `/tournaments/${tournamentId}/live/${fixtureId}`);
+
+// Club-wide chat — one shared room, any authenticated player
+export const listClubChatMessages = () =>
+  request<{ items: ClubChatMessage[] }>('GET', '/club/chat');
+export const postClubChatMessage = (text: string) =>
+  request<ClubChatMessage>('POST', '/club/chat', { text });
+
+// Video library — upload happens in two steps: get a presigned S3 URL,
+// PUT the raw file straight to S3 (bypasses API Gateway's payload size
+// limit entirely), then create the metadata record. AI commentary (via
+// AWS Bedrock, on frames extracted client-side) runs server-side after
+// that, asynchronously — the frontend polls aiStatus until it flips
+// from "pending" to "done"/"failed".
+export const presignVideoUpload = (contentType: string) =>
+  request<{ id: string; uploadUrl: string; s3Key: string }>('POST', '/videos/presign', { contentType });
+
+export const uploadVideoFile = (uploadUrl: string, file: File, onProgress?: (pct: number) => void): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('Upload failed.')));
+    xhr.onerror = () => reject(new Error('Upload failed — check your connection.'));
+    xhr.send(file);
+  });
+
+export const createVideoRecord = (input: { id: string; title: string; s3Key: string; tournamentId?: string; matchLabel?: string; frames: string[] }) =>
+  request<VideoRecord>('POST', '/videos', input);
+
+export const listVideos = () => request<{ items: VideoRecord[] }>('GET', '/videos');
+export const getVideoPlayUrl = (id: string) => request<{ url: string }>('GET', `/videos/${id}/play-url`);
+export const deleteVideo = (id: string) => request<{ ok: true }>('DELETE', `/videos/${id}`);
+
+// Expense splitting — Splitwise-style, scoped to one tournament
+export const listExpenses = (tournamentId: string) =>
+  request<{ items: TournamentExpense[] }>('GET', `/tournaments/${tournamentId}/expenses`);
+export const createExpense = (
+  tournamentId: string,
+  input: { description: string; category: ExpenseCategory; amount: number; paidBy: RosterPlayer; splitAmong: RosterPlayer[] }
+) => request<TournamentExpense>('POST', `/tournaments/${tournamentId}/expenses`, input);
+export const deleteExpense = (tournamentId: string, expenseId: string) =>
+  request<{ ok: true }>('DELETE', `/tournaments/${tournamentId}/expenses/${expenseId}`);
+
+// Club-wide expense splitting — not tied to any tournament
+export const listClubExpenses = () => request<{ items: TournamentExpense[] }>('GET', '/club/expenses');
+export const createClubExpense = (input: { description: string; category: ExpenseCategory; amount: number; paidBy: RosterPlayer; splitAmong: RosterPlayer[] }) =>
+  request<TournamentExpense>('POST', '/club/expenses', input);
+export const deleteClubExpense = (expenseId: string) =>
+  request<{ ok: true }>('DELETE', `/club/expenses/${expenseId}`);
+
+// Marketplace — used paddle listings, club-wide
+export const listMarketplace = () => request<{ items: MarketplaceListing[] }>('GET', '/marketplace');
+export const createMarketplaceListing = (input: { title: string; brand: string; condition: PaddleCondition; price: number; description: string; photoDataUrl?: string }) =>
+  request<MarketplaceListing>('POST', '/marketplace', input);
+export const updateMarketplaceListing = (id: string, input: { status?: 'available' | 'sold' }) =>
+  request<MarketplaceListing>('PUT', `/marketplace/${id}`, input);
+export const deleteMarketplaceListing = (id: string) =>
+  request<{ ok: true }>('DELETE', `/marketplace/${id}`);
+
+// In-app notifications
+export const listNotifications = () =>
+  request<{ items: AppNotification[]; unreadCount: number }>('GET', '/notifications');
+export const markNotificationRead = (id: string) =>
+  request<{ ok: true }>('PUT', `/notifications/${id}/read`);
+export const markAllNotificationsRead = () =>
+  request<{ ok: true; updated: number }>('PUT', '/notifications/read-all');
+
+// Tournament check-in (QR code, day-of)
+export const checkInToTournament = (tournamentId: string) =>
+  request<{ ok: true; checkedInAt: string }>('POST', `/tournaments/${tournamentId}/checkin`);
+
+// "Need a Sub" board
+export const listSubRequests = () => request<{ items: SubRequest[] }>('GET', '/sub-requests');
+export const createSubRequest = (input: { message: string; date?: string; tournamentId?: string }) =>
+  request<SubRequest>('POST', '/sub-requests', input);
+export const claimSubRequest = (id: string) => request<{ ok: true }>('POST', `/sub-requests/${id}/claim`);
+export const deleteSubRequest = (id: string) => request<{ ok: true }>('DELETE', `/sub-requests/${id}`);
+
 // Tournament matches
 export const listTournamentMatches = (id: string) =>
   request<{ items: TournamentMatch[] }>('GET', `/tournaments/${id}/matches`).then((r) => ({ items: r.items.map(normMatch) }));
@@ -264,3 +368,8 @@ export const getTournamentPlayerRankings = (id: string) =>
     undefined,
     { auth: false }
   );
+
+// Direct account lookup by email — the fallback for players who haven't
+// played a recorded match yet, so their real photo/DUPR still show up.
+export const getPlayerProfileByEmail = (email: string) =>
+  request<PublicPlayerProfile>('GET', `/players/lookup?email=${encodeURIComponent(email)}`, undefined, { auth: false });

@@ -4,8 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { decodeProfileId } from '../utils/profileId';
+import { BadgeRow } from './BadgeRow';
 import { useAppState } from '../AppContext';
-import type { RosterPlayer } from '../types';
+import type { RosterPlayer, PublicPlayerProfile } from '../types';
 import { toDataUrl } from '../utils/image';
 import { compressImageFile } from '../utils/imageCompress';
 import {
@@ -66,6 +68,7 @@ export const ProfileView: React.FC = () => {
     canNavigateBack,
     updateProfile,
     refreshPlayerRankings,
+    api,
   } = useAppState();
 
   // The shared playerRankings cache is only ever populated once, at app
@@ -74,19 +77,43 @@ export const ProfileView: React.FC = () => {
   // pull a fresh copy whenever this screen is opened.
   useEffect(() => { refreshPlayerRankings(); }, []);
 
-  // activePlayerId is usually an email (from navigateTo('profile', p.email || p.name)
-  // elsewhere in the app) but falls back to a plain name for legacy
-  // entries with no email on record — so it has to be treated as
-  // "email if it looks like one, otherwise a name" rather than always
-  // one or the other.
-  const isOwnProfile = !activePlayerId || (!!currentUser && norm(activePlayerId) === norm(currentUser.email));
-  const targetIdentity = isOwnProfile
-    ? { email: currentUser?.email, name: currentUser?.displayName }
-    : (activePlayerId && looksLikeEmail(activePlayerId) ? { email: activePlayerId } : { name: activePlayerId });
+  // activePlayerId now carries BOTH email and name when the navigating
+  // screen knew both (see utils/profileId) — falls back to guessing
+  // email-vs-name from a single legacy value for any caller that hasn't
+  // been updated to pass both.
+  const decodedNav = decodeProfileId(activePlayerId);
+  const isOwnProfile =
+    !activePlayerId ||
+    (!!currentUser &&
+      ((decodedNav.email && norm(decodedNav.email) === norm(currentUser.email)) ||
+        (!decodedNav.email && decodedNav.name && norm(decodedNav.name) === norm(currentUser.displayName))));
+  const emailIdentity = isOwnProfile ? currentUser?.email : decodedNav.email;
+  const nameIdentityFromNav = isOwnProfile ? currentUser?.displayName : decodedNav.name;
+
+  // Player Rankings only exists for players who've played a recorded
+  // match — a brand-new player with zero matches has no rankings row at
+  // all, even though their real profile (photo, DUPR) already exists on
+  // their account. This looks them up directly whenever we have an
+  // email to search by.
+  const [directProfile, setDirectProfile] = useState<PublicPlayerProfile | null>(null);
+  useEffect(() => {
+    setDirectProfile(null);
+    if (isOwnProfile || !emailIdentity) return;
+    api.getPlayerProfileByEmail(emailIdentity).then(setDirectProfile).catch(() => setDirectProfile(null));
+  }, [isOwnProfile, emailIdentity]);
+
+  // Matches from before the email-identity migration have no email
+  // attached at all — an otherwise-perfect email match against the
+  // account won't connect back to that old ranking row. Once the direct
+  // account lookup resolves a real name, use it as a second identity to
+  // try matching legacy (email-less) ranking rows against, in addition
+  // to whatever name the navigation itself already carried.
+  const targetIdentity = { email: emailIdentity, name: nameIdentityFromNav || directProfile?.displayName };
   const playerRow = playerRankings.find((p) => matchesIdentity(p, targetIdentity));
+
   // Fall back to whatever name is available for display purposes only —
   // never for matching.
-  const targetName = isOwnProfile ? (currentUser?.displayName || '') : (playerRow?.player || activePlayerId || '');
+  const targetName = isOwnProfile ? (currentUser?.displayName || '') : (directProfile?.displayName || playerRow?.player || activePlayerId || '');
 
   // Editing state
   const [isEditing, setIsEditing] = useState(false);
@@ -94,6 +121,7 @@ export const ProfileView: React.FC = () => {
   const [editDuprId, setEditDuprId] = useState('');
   const [editAvatarUrl, setEditAvatarUrl] = useState('');
   const [editDuprRating, setEditDuprRating] = useState('');
+  const [editZelleContact, setEditZelleContact] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editAvatarMode, setEditAvatarMode] = useState<'presets' | 'upload' | 'url'>('presets');
@@ -145,6 +173,7 @@ export const ProfileView: React.FC = () => {
       setEditDuprId(currentUser.duprId || '');
       setEditAvatarUrl(currentUser.avatarDataUrl || '');
       setEditDuprRating(currentUser.duprRating != null ? currentUser.duprRating.toFixed(2) : '4.00');
+      setEditZelleContact(currentUser.zelleContact || '');
     }
   }, [currentUser]);
 
@@ -171,6 +200,7 @@ export const ProfileView: React.FC = () => {
         duprId: editDuprId.trim(),
         duprRating: ratingNum,
         avatarDataUrl,
+        zelleContact: editZelleContact.trim(),
       });
       setIsEditing(false);
     } catch (err: any) {
@@ -179,22 +209,6 @@ export const ProfileView: React.FC = () => {
       setEditSaving(false);
     }
   };
-
-  if (!isOwnProfile && !playerRow) {
-    return (
-      <div className="flex flex-col items-center justify-center p-12 min-h-[50vh] gap-4">
-        <p className="text-sm font-mono text-slate-gray">No public profile found for "{targetName}".</p>
-        {canNavigateBack && (
-          <button
-            onClick={navigateBack}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold uppercase tracking-wider text-slate-gray hover:text-charcoal bg-white border border-light-border rounded-xl transition-all cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4" /><span>Back</span>
-          </button>
-        )}
-      </div>
-    );
-  }
 
   if (isOwnProfile && !currentUser) {
     return (
@@ -205,9 +219,9 @@ export const ProfileView: React.FC = () => {
     );
   }
 
-  const displayName = isOwnProfile ? currentUser!.displayName : (playerRow?.player || targetName);
-  const displayAvatar = (isOwnProfile ? currentUser!.avatarDataUrl : playerRow?.avatarDataUrl) || defaultAvatar(displayName);
-  const displayDupr = isOwnProfile ? currentUser!.duprRating : playerRow?.duprRating;
+  const displayName = isOwnProfile ? currentUser!.displayName : (directProfile?.displayName || playerRow?.player || targetName);
+  const displayAvatar = (isOwnProfile ? currentUser!.avatarDataUrl : (directProfile?.avatarDataUrl || playerRow?.avatarDataUrl)) || defaultAvatar(displayName);
+  const displayDupr = isOwnProfile ? currentUser!.duprRating : (directProfile?.duprRating ?? playerRow?.duprRating);
   const wins = playerRow?.wins ?? 0;
   const losses = playerRow?.losses ?? 0;
   const played = playerRow?.played ?? 0;
@@ -311,6 +325,7 @@ export const ProfileView: React.FC = () => {
                 )}
               </div>
               {isOwnProfile && <p className="text-slate-400 text-xs font-mono">{currentUser!.email}</p>}
+              <BadgeRow row={playerRow} />
             </div>
           </div>
 
@@ -649,6 +664,18 @@ export const ProfileView: React.FC = () => {
                     placeholder="Optional"
                     className="w-full bg-off-white dark:bg-slate-900/50 text-charcoal dark:text-white border border-light-border dark:border-slate-800 rounded-xl py-2 px-3 text-xs font-semibold focus:outline-none focus:border-court-green focus:ring-1 focus:ring-court-green"
                   />
+                </div>
+
+                <div className="space-y-1 col-span-2">
+                  <label className="text-[9px] text-slate-gray dark:text-slate-400 font-mono uppercase font-bold tracking-wider">Zelle (email or phone)</label>
+                  <input
+                    type="text"
+                    value={editZelleContact}
+                    onChange={(e) => setEditZelleContact(e.target.value)}
+                    placeholder="you@email.com or (555) 123-4567"
+                    className="w-full bg-off-white dark:bg-slate-900/50 text-charcoal dark:text-white border border-light-border dark:border-slate-800 rounded-xl py-2 px-3 text-xs font-semibold focus:outline-none focus:border-court-green focus:ring-1 focus:ring-court-green"
+                  />
+                  <p className="text-[9px] text-slate-gray dark:text-slate-500">Shown as a QR code to teammates settling up expenses with you — optional, leave blank to hide.</p>
                 </div>
               </div>
 

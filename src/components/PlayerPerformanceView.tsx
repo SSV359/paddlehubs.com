@@ -4,8 +4,10 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import { useAppState } from '../AppContext';
 import { defaultAvatar } from '../utils/avatar';
+import { BadgeRow } from './BadgeRow';
 import { NetDivider } from './NetDivider';
 import type { PlayerRankingRow, TournamentMatch } from '../types';
 import {
@@ -172,8 +174,9 @@ export const PlayerPerformanceView: React.FC = () => {
                     {selected.online && <span className="text-[10px] text-court-green font-mono font-bold">&bull; Online</span>}
                     <span className="text-[10px] text-slate-gray font-mono">{selected.played} games played</span>
                   </div>
+                  <div className="mt-2"><BadgeRow row={selected} size="sm" /></div>
                 </div>
-                <button onClick={() => navigateTo('profile', selected.email || selected.player)} className="px-3 py-2 rounded-lg bg-court-green/10 text-court-green text-[10px] font-bold font-mono uppercase cursor-pointer hover:bg-court-green/20 transition-all flex items-center gap-1">
+                <button onClick={() => navigateTo('profile', encodeProfileId(selected.email, selected.player))} className="px-3 py-2 rounded-lg bg-court-green/10 text-court-green text-[10px] font-bold font-mono uppercase cursor-pointer hover:bg-court-green/20 transition-all flex items-center gap-1">
                   Full Profile <ArrowUpRight className="w-3.5 h-3.5" />
                 </button>
               </div>

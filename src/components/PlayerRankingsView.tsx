@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import { useAppState } from '../AppContext';
 import { defaultAvatar } from '../utils/avatar';
 import { TopRankedPlayersRail } from './TopRankedPlayersRail';
@@ -60,7 +61,7 @@ export const PlayerRankingsView: React.FC = () => {
                       </div>
                     </td>
                     <td className="py-4 px-6">
-                      <button onClick={() => navigateTo('profile', p.email || p.player)} className="flex items-center gap-3 hover:text-court-green group/pbtn transition-colors text-left cursor-pointer">
+                      <button onClick={() => navigateTo('profile', encodeProfileId(p.email, p.player))} className="flex items-center gap-3 hover:text-court-green group/pbtn transition-colors text-left cursor-pointer">
                         <img src={p.avatarDataUrl || defaultAvatar(p.player)} alt={p.player} className="w-9 h-9 rounded-lg object-cover border border-light-border group-hover/pbtn:border-court-green/40 shadow-sm" referrerPolicy="no-referrer" />
                         <div>
                           <span className="font-bold text-sm text-charcoal group-hover/pbtn:text-court-green transition-colors block">{p.player}</span>

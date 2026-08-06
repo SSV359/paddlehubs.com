@@ -12,6 +12,15 @@ import { DashboardView } from './components/DashboardView';
 import { LeaderboardView } from './components/LeaderboardView';
 import { PlayerRankingsView } from './components/PlayerRankingsView';
 import { PlayerPerformanceView } from './components/PlayerPerformanceView';
+import { ClubChatView } from './components/ClubChatView';
+import { VideoLibraryView } from './components/VideoLibraryView';
+import { ClubExpensesView } from './components/ClubExpensesView';
+import { MarketplaceView } from './components/MarketplaceView';
+import { PlayerDirectoryView } from './components/PlayerDirectoryView';
+import { NeedASubView } from './components/NeedASubView';
+import { LiveMatchesView } from './components/LiveMatchesView';
+import { PairingWheelView } from './components/PairingWheelView';
+import { NotificationBell } from './components/NotificationBell';
 import { TournamentsView } from './components/TournamentsView';
 import { TournamentDetailsView } from './components/TournamentDetailsView';
 import { ScheduleView } from './components/ScheduleView';
@@ -22,10 +31,10 @@ import { RegistrationView } from './components/RegistrationView';
 import { RegisteredUsersView } from './components/RegisteredUsersView';
 import { BookingsView } from './components/BookingsView';
 import { AnalyticsView } from './components/AnalyticsView';
-import { ShieldCheck, Calendar, Bell, Menu, Sun, Moon } from 'lucide-react';
+import { ShieldCheck, Calendar, Menu, Sun, Moon } from 'lucide-react';
 
 const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
-  const { currentView, activeTeamId, activeTournamentId, activePlayerId, navigateTo, theme, toggleTheme, isAuthenticated } = useAppState();
+  const { currentView, activeTeamId, activeTournamentId, activePlayerId, navigateTo, theme, toggleTheme, isAuthenticated, api } = useAppState();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Check for register URL parameter on mount
@@ -56,6 +65,22 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         return 'Overall Player Rankings';
       case 'player-performance':
         return 'Player Performance & Analysis';
+      case 'club-chat':
+        return 'Club Chat';
+      case 'video-library':
+        return 'Virtual AI Coach';
+      case 'club-expenses':
+        return 'Split Costs';
+      case 'marketplace':
+        return 'Paddle Marketplace';
+      case 'player-directory':
+        return 'Player Directory';
+      case 'need-a-sub':
+        return 'Need a Sub';
+      case 'live-matches':
+        return 'Live Matches';
+      case 'pairing-wheel':
+        return 'Pairing Wheel';
       case 'tournaments':
         return 'Brackets Directory';
       case 'tournament-hub':
@@ -86,7 +111,7 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   };
 
   const isViewRestricted = (view: string) => {
-    const publicViews = ['dashboard', 'leaderboard', 'tournaments', 'tournament-hub', 'schedule', 'register-bracket'];
+    const publicViews = ['dashboard', 'leaderboard', 'tournaments', 'tournament-hub', 'schedule', 'register-bracket', 'player-directory', 'live-matches'];
     if (view === 'profile' && activePlayerId) {
       return false;
     }
@@ -140,11 +165,8 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               )}
             </button>
 
-            {/* Notification placeholder */}
-            <button className="p-2 text-slate-gray dark:text-slate-400 hover:text-charcoal dark:hover:text-white rounded-lg hover:bg-off-white dark:hover:bg-slate-800 transition-colors relative cursor-pointer">
-              <Bell className="w-4.5 h-4.5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-court-green" />
-            </button>
+            {/* Notifications */}
+            <NotificationBell api={api} isAuthenticated={isAuthenticated} navigateTo={navigateTo} />
           </div>
         </header>
 
@@ -173,6 +195,14 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               {currentView === 'leaderboard' && <LeaderboardView />}
               {currentView === 'player-rankings' && <PlayerRankingsView />}
               {currentView === 'player-performance' && <PlayerPerformanceView />}
+              {currentView === 'club-chat' && <ClubChatView />}
+              {currentView === 'video-library' && <VideoLibraryView />}
+              {currentView === 'club-expenses' && <ClubExpensesView />}
+              {currentView === 'marketplace' && <MarketplaceView />}
+              {currentView === 'player-directory' && <PlayerDirectoryView />}
+              {currentView === 'need-a-sub' && <NeedASubView />}
+              {currentView === 'live-matches' && <LiveMatchesView />}
+              {currentView === 'pairing-wheel' && <PairingWheelView />}
               {currentView === 'tournaments' && <TournamentsView />}
               {currentView === 'tournament-hub' && <TournamentDetailsView />}
               {currentView === 'schedule' && <ScheduleView />}

@@ -46,7 +46,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
             </div>
             <h3 className="text-sm font-display font-black uppercase text-charcoal dark:text-white tracking-tight">Secure Athlete Portal</h3>
             <p className="text-xs text-slate-gray leading-normal">
-              Sign in or create your account through our secure AWS-verified authentication gateway.
+              Sign in or create your account to get started — quick, secure, and only takes a moment.
             </p>
           </div>
 

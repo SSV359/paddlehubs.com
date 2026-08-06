@@ -4,9 +4,12 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { encodeProfileId } from '../utils/profileId';
 import { useAppState } from '../AppContext';
 import { AuctionRoom } from './AuctionRoom';
+import { ExpensesPanel } from './TournamentExpensesPanel';
 import { NetDivider } from './NetDivider';
+import { LiveScoreboardModal } from './LiveScoreboardModal';
 import type {
   Tournament,
   TeamStandingRow,
@@ -16,6 +19,8 @@ import type {
   TournamentRegistration,
   TournamentTeam,
   RosterPlayer,
+  ScheduleFixture,
+  LiveMatch,
   Me,
 } from '../types';
 import {
@@ -40,6 +45,8 @@ import {
   UserPlus,
   Settings,
   Check,
+  QrCode,
+  Radio,
   CheckSquare,
   Square,
   X,
@@ -48,11 +55,12 @@ import {
   Share2,
   Medal,
   Gavel,
+  DollarSign,
   MessageCircle,
   Send,
 } from 'lucide-react';
 
-type SubTab = 'overview' | 'standings' | 'player-rankings' | 'teams' | 'matches' | 'schedule' | 'registrations' | 'playoffs' | 'auction';
+type SubTab = 'overview' | 'standings' | 'player-rankings' | 'teams' | 'matches' | 'schedule' | 'registrations' | 'playoffs' | 'auction' | 'expenses';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const deriveStatus = (t: Tournament) => {
@@ -180,6 +188,7 @@ export const TournamentDetailsView: React.FC = () => {
     { id: 'teams', label: 'Teams & Roster', icon: Users },
     { id: 'matches', label: 'Match History', icon: History },
     { id: 'schedule', label: 'Schedule', icon: Calendar },
+    { id: 'expenses', label: 'Split Costs', icon: DollarSign },
     { id: 'auction', label: 'Player Auction', icon: Gavel },
     // Only the owner or an admin can see who's registered — not just any
     // logged-in user — and both can manage (view/edit/delete) that list.
@@ -329,7 +338,12 @@ export const TournamentDetailsView: React.FC = () => {
 
       {/* Tab Panels */}
       <div className="bg-transparent" id="subtab-panel-container">
-        {activeSubTab === 'overview' && <OverviewPanel tour={tour} isAdmin={canEdit} api={api} onChanged={refreshTournaments} />}
+        {activeSubTab === 'overview' && (
+          <>
+            <OverviewPanel tour={tour} isAdmin={canEdit} api={api} onChanged={refreshTournaments} />
+            {isAuthenticated && <CheckInCard tour={tour} isAdmin={canEdit} currentUser={currentUser} api={api} onChanged={refreshTournaments} />}
+          </>
+        )}
         {activeSubTab === 'standings' && <StandingsPanel standings={standings} loading={loadingTab} navigateTo={navigateTo} />}
         {activeSubTab === 'player-rankings' && <RankingsPanel tour={tour} api={api} navigateTo={navigateTo} />}
         {activeSubTab === 'teams' && (
@@ -358,6 +372,7 @@ export const TournamentDetailsView: React.FC = () => {
           <PlayoffsPanel tour={tour} api={api} onChanged={refreshTournaments} />
         )}
         {activeSubTab === 'auction' && <AuctionRoom tournament={tour} isAdmin={canEdit} onChanged={refreshTournaments} api={api} />}
+        {activeSubTab === 'expenses' && <ExpensesPanel tour={tour} isAuthenticated={isAuthenticated} currentUser={currentUser} isAdmin={canEdit} api={api} />}
       </div>
 
       {/* Confirmation Modal */}
@@ -547,6 +562,80 @@ const RegistrationWindowCard: React.FC<{ tour: Tournament; isAdmin: boolean; api
 };
 
 // ---------------- Standings ----------------
+const CheckInCard: React.FC<{ tour: Tournament; isAdmin: boolean; currentUser: Me | null; api: any; onChanged: () => void }> = ({ tour, isAdmin, currentUser, api, onChanged }) => {
+  const [showQr, setShowQr] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+
+  const myEmail = (currentUser?.email || '').trim().toLowerCase();
+  const alreadyCheckedIn = !!(myEmail && tour.checkedIn?.[myEmail]);
+  const checkedInCount = Object.keys(tour.checkedIn || {}).length;
+  const checkInUrl = `${window.location.origin}${window.location.pathname}?checkin=${tour.id}`;
+
+  const openQr = async () => {
+    setShowQr(true);
+    if (!qrDataUrl) {
+      const QRCode = (await import('qrcode')).default;
+      QRCode.toDataURL(checkInUrl, { width: 280, margin: 1, color: { dark: '#0A1220', light: '#FFFFFF' } }).then(setQrDataUrl).catch(() => {});
+    }
+  };
+
+  const checkInNow = async () => {
+    setCheckingIn(true);
+    try {
+      await api.checkInToTournament(tour.id);
+      onChanged();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCheckingIn(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-light-border rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-court-green/10 border border-court-green/20 flex items-center justify-center text-court-green shrink-0">
+          <QrCode className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="font-display font-bold text-sm text-charcoal">Day-of Check-In</h3>
+          <p className="text-[10px] text-slate-gray font-mono">{checkedInCount} player{checkedInCount === 1 ? '' : 's'} checked in so far</p>
+        </div>
+      </div>
+      <div className="flex gap-2 shrink-0">
+        {isAdmin && (
+          <button onClick={openQr} className="px-3.5 py-2 rounded-lg border border-light-border text-xs font-bold font-mono uppercase text-charcoal hover:border-court-green hover:text-court-green transition-all cursor-pointer flex items-center gap-1.5">
+            <QrCode className="w-4 h-4" /> Show QR
+          </button>
+        )}
+        <button
+          onClick={checkInNow}
+          disabled={alreadyCheckedIn || checkingIn}
+          className="px-3.5 py-2 rounded-lg bg-court-green hover:bg-[#235F3A] text-white text-xs font-bold font-mono uppercase transition-all cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
+        >
+          {alreadyCheckedIn ? <><Check className="w-4 h-4" /> Checked In</> : checkingIn ? 'Checking in...' : 'Check In Now'}
+        </button>
+      </div>
+
+      {showQr && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowQr(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-xs shadow-2xl text-center" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-display font-bold text-sm text-charcoal mb-3">Scan to Check In</h3>
+            {qrDataUrl ? (
+              <img src={qrDataUrl} alt="Check-in QR code" className="w-64 h-64 mx-auto rounded-lg border border-light-border" />
+            ) : (
+              <div className="w-64 h-64 mx-auto rounded-lg border border-light-border bg-off-white flex items-center justify-center text-xs text-slate-gray">Generating...</div>
+            )}
+            <p className="text-[10px] text-slate-gray font-mono mt-3">Display this at the venue — players scan it with their phone camera to check in instantly.</p>
+            <button onClick={() => setShowQr(false)} className="mt-3 text-xs font-bold text-court-green hover:underline cursor-pointer">Close</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const StandingsPanel: React.FC<{ standings: TeamStandingRow[]; loading: boolean; navigateTo: any }> = ({ standings, loading, navigateTo }) => (
   <div className="bg-white border border-light-border rounded-2xl overflow-hidden shadow-sm animate-fadeIn">
     <div className="overflow-x-auto">
@@ -643,7 +732,7 @@ const RankingsPanel: React.FC<{ tour: Tournament; api: any; navigateTo: any }> =
                 <tr key={r.player} className="hover:bg-off-white/40 transition-all">
                   <td className="py-4 px-6 text-center font-mono font-bold text-sm">{r.rank}</td>
                   <td className="py-4 px-6">
-                    <button onClick={() => navigateTo('profile', r.email || r.player)} className="font-bold text-sm text-charcoal hover:text-court-green cursor-pointer">{r.player}</button>
+                    <button onClick={() => navigateTo('profile', encodeProfileId(r.email, r.player))} className="font-bold text-sm text-charcoal hover:text-court-green cursor-pointer">{r.player}</button>
                   </td>
                   <td className="py-4 px-6 text-center font-mono font-bold">{r.wins}</td>
                   <td className="py-4 px-6 text-center font-mono font-bold text-slate-gray">{r.losses}</td>
@@ -822,7 +911,7 @@ const TeamsPanel: React.FC<{ tour: Tournament; isAdmin: boolean; navigateTo: any
             <div className="space-y-1.5 pl-2">
               {team.players.map((p, pIdx) => (
                 <div key={p.email || `${p.name}-${pIdx}`} className="flex items-center justify-between text-xs bg-off-white border border-light-border rounded-lg px-2.5 py-1.5">
-                  <button onClick={() => navigateTo('profile', p.email || p.name)} className="text-charcoal hover:text-court-green cursor-pointer font-semibold text-left">
+                  <button onClick={() => navigateTo('profile', encodeProfileId(p.email, p.name))} className="text-charcoal hover:text-court-green cursor-pointer font-semibold text-left">
                     {p.name}
                     {p.email && <span className="text-[9px] text-slate-gray font-mono block">{p.email}</span>}
                   </button>
@@ -1042,6 +1131,38 @@ const SchedulePanel: React.FC<{
 }> = ({ tour, schedule, matches, loading, isAdmin, isAuthenticated, currentUser, api, onChanged }) => {
   const [recordingFixture, setRecordingFixture] = useState<{ weekIdx: number; fixtureIdx: number } | null>(null);
   const [chatFixture, setChatFixture] = useState<{ fixtureId: string; label: string } | null>(null);
+  const [liveFixture, setLiveFixture] = useState<{ weekIdx: number; fixtureIdx: number } | null>(null);
+  const [liveMatches, setLiveMatches] = useState<LiveMatch[]>([]);
+
+  // Polls for every currently-live match across the whole tournament —
+  // separate from the single-fixture poll inside LiveScoreboardModal
+  // itself, since this drives the "Live Now" board that can show
+  // several simultaneous matches (different courts) at once.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => api.listLiveMatches(tour.id).then((r: any) => { if (!cancelled) setLiveMatches(r.items); }).catch(() => {});
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [tour.id]);
+
+  const findFixtureLocation = (fixtureId: string) => {
+    if (!schedule) return null;
+    for (let weekIdx = 0; weekIdx < schedule.weeks.length; weekIdx++) {
+      const fixtureIdx = schedule.weeks[weekIdx].fixtures.findIndex((f) => f.fixtureId === fixtureId);
+      if (fixtureIdx !== -1) return { weekIdx, fixtureIdx };
+    }
+    return null;
+  };
+
+  const canControlFixture = (fixtureId: string) => {
+    if (isAdmin) return true;
+    const loc = findFixtureLocation(fixtureId);
+    if (!loc || !schedule) return false;
+    const f = schedule.weeks[loc.weekIdx].fixtures[loc.fixtureIdx];
+    const myEmail = (currentUser?.email || '').trim().toLowerCase();
+    return [...f.teamAPlayers, ...f.teamBPlayers].some((p) => p.email && p.email === myEmail);
+  };
   const [showGenerator, setShowGenerator] = useState(false);
 
   // MLP-style events run as same-day/short-interval "Rounds"; standard
@@ -1064,7 +1185,56 @@ const SchedulePanel: React.FC<{
   };
 
   return (
-    <div className="bg-white border border-light-border rounded-2xl p-5 shadow-sm space-y-4 animate-fadeIn">
+    <div className="space-y-4 animate-fadeIn">
+      {liveMatches.length > 0 && (
+        <div className="bg-deep-navy border border-rose-500/20 rounded-2xl p-5 shadow-md">
+          <div className="flex items-center gap-2 mb-3">
+            <Radio className="w-4 h-4 text-rose-400 animate-pulse" />
+            <h3 className="font-display text-[10px] font-bold text-rose-300 tracking-widest uppercase">
+              Live Now &middot; {liveMatches.length} match{liveMatches.length === 1 ? '' : 'es'}
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {liveMatches.map((lm) => {
+              const loc = findFixtureLocation(lm.fixtureId);
+              return (
+                <button
+                  key={lm.fixtureId}
+                  onClick={() => loc && setLiveFixture(loc)}
+                  disabled={!loc}
+                  className="text-left bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-3.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[9px] font-mono text-slate-400 uppercase">{lm.court}</span>
+                    {lm.games.length > 0 && (
+                      <span className="text-[9px] font-mono text-slate-500">{lm.games.map((g) => `${g.a}-${g.b}`).join(', ')}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-white truncate block">{lm.teamAName}</span>
+                      {lm.teamAPlayers.length > 0 && <span className="text-[9px] text-slate-400 font-mono truncate block">{lm.teamAPlayers.map((p) => p.name).join(' & ')}</span>}
+                    </div>
+                    <span className="text-lg font-display font-black text-white mx-2 shrink-0">{lm.liveA}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs font-bold text-white truncate block">{lm.teamBName}</span>
+                      {lm.teamBPlayers.length > 0 && <span className="text-[9px] text-slate-400 font-mono truncate block">{lm.teamBPlayers.map((p) => p.name).join(' & ')}</span>}
+                    </div>
+                    <span className="text-lg font-display font-black text-white mx-2 shrink-0">{lm.liveB}</span>
+                  </div>
+                  <span className="text-[9px] font-mono text-court-green uppercase mt-2 block">
+                    {canControlFixture(lm.fixtureId) ? 'Tap to manage score' : 'Tap to watch'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+    <div className="bg-white border border-light-border rounded-2xl p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-display text-[10px] font-medium text-slate-gray tracking-widest uppercase">
           {tour.format === 'mlp_singles' ? 'Round-by-Round Plan' : 'Weekly Fixture Plan'}
@@ -1147,6 +1317,15 @@ const SchedulePanel: React.FC<{
                             <MessageCircle className="w-4 h-4" />
                           </button>
                         )}
+                        {canChat && !recordedMatch && (
+                          <button
+                            onClick={() => setLiveFixture({ weekIdx, fixtureIdx })}
+                            title="Go live with courtside scoring"
+                            className="shrink-0 w-9 rounded-lg border border-rose-200 bg-white hover:bg-rose-50 text-rose-500 transition-all cursor-pointer flex items-center justify-center"
+                          >
+                            <Radio className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -1192,6 +1371,22 @@ const SchedulePanel: React.FC<{
           onClose={() => setChatFixture(null)}
         />
       )}
+
+      {liveFixture && schedule && (
+        <LiveScoreboardModal
+          tour={tour}
+          fixture={schedule.weeks[liveFixture.weekIdx].fixtures[liveFixture.fixtureIdx]}
+          weekDate={schedule.weeks[liveFixture.weekIdx].date}
+          api={api}
+          onClose={() => setLiveFixture(null)}
+          onFinished={async (matchId) => {
+            await linkFixtureToMatch(liveFixture.weekIdx, liveFixture.fixtureIdx, matchId);
+            setLiveFixture(null);
+            onChanged();
+          }}
+        />
+      )}
+    </div>
     </div>
   );
 };

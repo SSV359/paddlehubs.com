@@ -338,6 +338,12 @@ export const ProfileView: React.FC = () => {
               </span>
             </div>
             <div className="text-center sm:text-left pl-4 border-l border-white/10">
+              <span className="text-[9px] text-slate-400 font-bold font-mono tracking-widest block uppercase" title="Computed from match results within this club">Club Rating</span>
+              <span className="text-3xl font-display font-extrabold text-soft-gold tracking-tight mt-1 block">
+                {playerRow?.clubRating != null ? playerRow.clubRating.toFixed(2) : '—'}
+              </span>
+            </div>
+            <div className="text-center sm:text-left pl-4 border-l border-white/10">
               <span className="text-[9px] text-slate-400 font-bold font-mono tracking-widest block uppercase">ACTIVE SEED</span>
               <span className="text-3xl font-display font-extrabold text-white tracking-tight mt-1 block">
                 {playerRow ? `#${playerRow.rank}` : '—'}

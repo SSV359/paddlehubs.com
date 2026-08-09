@@ -6,6 +6,7 @@ import type {
   ClubMatch,
   Booking,
   Tournament,
+  TournamentWinnerEntry,
   TournamentPublicInfo,
   TournamentRegistration,
   TournamentMatch,
@@ -181,6 +182,8 @@ export const getTournamentSchedule = (id: string) =>
   request<TournamentSchedule>('GET', `/tournaments/${id}/schedule`).then(normSchedule);
 export const saveTournamentSchedule = (id: string, weeks: TournamentSchedule['weeks']) =>
   request<TournamentSchedule>('PUT', `/tournaments/${id}/schedule`, { weeks }).then(normSchedule);
+export const linkFixtureMatch = (id: string, fixtureId: string, matchId: string) =>
+  request<{ ok: true }>('POST', `/tournaments/${id}/schedule/link-match`, { fixtureId, matchId });
 export const deleteTournamentSchedule = (id: string) =>
   request<{ ok: true }>('DELETE', `/tournaments/${id}/schedule`);
 
@@ -242,6 +245,9 @@ export const getVideoPlayUrl = (id: string) => request<{ url: string }>('GET', `
 export const deleteVideo = (id: string) => request<{ ok: true }>('DELETE', `/videos/${id}`);
 
 // Expense splitting — Splitwise-style, scoped to one tournament
+export const dedupePlayerPool = (tournamentId: string) =>
+  request<{ ok: true; playerPool: RosterPlayer[]; removedCount: number }>('POST', `/tournaments/${tournamentId}/player-pool/dedupe`);
+
 export const listExpenses = (tournamentId: string) =>
   request<{ items: TournamentExpense[] }>('GET', `/tournaments/${tournamentId}/expenses`);
 export const createExpense = (
@@ -278,6 +284,10 @@ export const markAllNotificationsRead = () =>
 // Tournament check-in (QR code, day-of)
 export const checkInToTournament = (tournamentId: string) =>
   request<{ ok: true; checkedInAt: string }>('POST', `/tournaments/${tournamentId}/checkin`);
+export const updateTournamentWinners = (
+  tournamentId: string,
+  input: { first?: TournamentWinnerEntry; second?: TournamentWinnerEntry; third?: TournamentWinnerEntry }
+) => request<{ ok: true; winners: Tournament['winners'] }>('PUT', `/tournaments/${tournamentId}/winners`, input);
 
 // "Need a Sub" board
 export const listSubRequests = () => request<{ items: SubRequest[] }>('GET', '/sub-requests');
@@ -300,6 +310,21 @@ export const updateTournamentMatch = (
 ) => request<TournamentMatch>('PUT', `/tournaments/${id}/matches/${matchId}`, input).then(normMatch);
 export const clearTournamentMatchScore = (id: string, matchId: string) =>
   request<TournamentMatch>('PUT', `/tournaments/${id}/matches/${matchId}/clear-score`).then(normMatch);
+export const recordPlayoffMatch = (
+  tournamentId: string,
+  slot: 'semifinal1' | 'semifinal2' | 'championship' | 'thirdPlace',
+  input: Partial<TournamentMatch> & { games: unknown[] }
+) => request<{ ok: true; match: TournamentMatch }>('POST', `/tournaments/${tournamentId}/playoffs/${slot}/record`, input);
+export const linkExistingPlayoffMatch = (
+  tournamentId: string,
+  slot: 'semifinal1' | 'semifinal2' | 'championship' | 'thirdPlace',
+  matchId: string
+) => request<{ ok: true }>('POST', `/tournaments/${tournamentId}/playoffs/${slot}/link-existing`, { matchId });
+export const unlinkPlayoffMatch = (
+  tournamentId: string,
+  slot: 'semifinal1' | 'semifinal2' | 'championship' | 'thirdPlace',
+  matchId: string
+) => request<{ ok: true }>('POST', `/tournaments/${tournamentId}/playoffs/${slot}/unlink`, { matchId });
 export const deleteTournamentMatch = (id: string, matchId: string) =>
   request<{ ok: true }>('DELETE', `/tournaments/${id}/matches/${matchId}`);
 

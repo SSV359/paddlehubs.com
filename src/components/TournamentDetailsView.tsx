@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { encodeProfileId } from '../utils/profileId';
 import { useAppState } from '../AppContext';
 import { AuctionRoom } from './AuctionRoom';
 import { ExpensesPanel } from './TournamentExpensesPanel';
 import { NetDivider } from './NetDivider';
 import { LiveScoreboardModal } from './LiveScoreboardModal';
+import { TournamentWinnersCard } from './TournamentWinnersCard';
 import type {
   Tournament,
   TeamStandingRow,
@@ -29,6 +30,7 @@ import {
   MapPin,
   Trophy,
   Users,
+  ChevronDown,
   Info,
   History,
   FileText,
@@ -342,6 +344,7 @@ export const TournamentDetailsView: React.FC = () => {
           <>
             <OverviewPanel tour={tour} isAdmin={canEdit} api={api} onChanged={refreshTournaments} />
             {isAuthenticated && <CheckInCard tour={tour} isAdmin={canEdit} currentUser={currentUser} api={api} onChanged={refreshTournaments} />}
+            <TournamentWinnersCard tour={tour} isAdmin={canEdit} api={api} onChanged={refreshTournaments} />
           </>
         )}
         {activeSubTab === 'standings' && <StandingsPanel standings={standings} loading={loadingTab} navigateTo={navigateTo} />}
@@ -444,7 +447,22 @@ const OverviewPanel: React.FC<{ tour: Tournament; isAdmin: boolean; api: any; on
         </div>
         {tour.playerPool && tour.playerPool.length > 0 && (
           <div className="bg-white border border-light-border rounded-2xl p-6 space-y-4 shadow-sm">
-            <h3 className="font-display font-bold text-lg text-charcoal">Player Pool ({tour.playerPool.length})</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-display font-bold text-lg text-charcoal">Player Pool ({tour.playerPool.length})</h3>
+              {isAdmin && (
+                <button
+                  onClick={async () => {
+                    const r = await api.dedupePlayerPool(tour.id);
+                    onChanged();
+                    if (r.removedCount > 0) alert(`Removed ${r.removedCount} duplicate ${r.removedCount === 1 ? 'entry' : 'entries'}.`);
+                    else alert('No duplicates found.');
+                  }}
+                  className="text-[10px] font-bold font-mono uppercase text-court-green hover:underline cursor-pointer"
+                >
+                  Clean Up Duplicates
+                </button>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
               {tour.playerPool.map((p) => (
                 <span key={p.email || p.name} className="text-xs font-mono bg-off-white border border-light-border px-2.5 py-1 rounded-lg text-charcoal">{p.name}</span>
@@ -788,6 +806,13 @@ const TeamsPanel: React.FC<{ tour: Tournament; isAdmin: boolean; navigateTo: any
   const removePlayer = (idx: number, playerIdx: number) => {
     setTeams((prev) => prev.map((t, i) => (i === idx ? { ...t, players: t.players.filter((_, pi) => pi !== playerIdx) } : t)));
   };
+  // Level (1-4) drives the Level-Restricted scheduling mode: L1/L2
+  // players only ever get paired against other L1/L2, and L3/L4 only
+  // against other L3/L4. Optional — players with no level set just
+  // aren't eligible for that mode until one's assigned.
+  const setPlayerLevel = (idx: number, playerIdx: number, level: 1 | 2 | 3 | 4 | undefined) => {
+    setTeams((prev) => prev.map((t, i) => (i === idx ? { ...t, players: t.players.map((p, pi) => (pi === playerIdx ? { ...p, level } : p)) } : t)));
+  };
   // Captain is stored as the captain's email (or name, for a legacy
   // player with no email on record).
   const captainValueFor = (p: RosterPlayer) => p.email || p.name;
@@ -915,7 +940,25 @@ const TeamsPanel: React.FC<{ tour: Tournament; isAdmin: boolean; navigateTo: any
                     {p.name}
                     {p.email && <span className="text-[9px] text-slate-gray font-mono block">{p.email}</span>}
                   </button>
-                  {isAdmin && <button onClick={() => removePlayer(idx, pIdx)} className="text-slate-gray hover:text-red-600 cursor-pointer shrink-0"><X className="w-3.5 h-3.5" /></button>}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {isAdmin ? (
+                      <select
+                        value={p.level || ''}
+                        onChange={(e) => setPlayerLevel(idx, pIdx, e.target.value ? (Number(e.target.value) as 1 | 2 | 3 | 4) : undefined)}
+                        title="Player level (for Level-Restricted scheduling)"
+                        className="text-[9px] font-mono font-bold bg-white border border-light-border rounded px-1.5 py-1 cursor-pointer"
+                      >
+                        <option value="">No Level</option>
+                        <option value="1">L1</option>
+                        <option value="2">L2</option>
+                        <option value="3">L3</option>
+                        <option value="4">L4</option>
+                      </select>
+                    ) : p.level ? (
+                      <span className="text-[9px] font-mono font-bold text-court-green bg-court-green/10 border border-court-green/20 rounded px-1.5 py-1">L{p.level}</span>
+                    ) : null}
+                    {isAdmin && <button onClick={() => removePlayer(idx, pIdx)} className="text-slate-gray hover:text-red-600 cursor-pointer"><X className="w-3.5 h-3.5" /></button>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1133,6 +1176,37 @@ const SchedulePanel: React.FC<{
   const [chatFixture, setChatFixture] = useState<{ fixtureId: string; label: string } | null>(null);
   const [liveFixture, setLiveFixture] = useState<{ weekIdx: number; fixtureIdx: number } | null>(null);
   const [liveMatches, setLiveMatches] = useState<LiveMatch[]>([]);
+  const [playerFilter, setPlayerFilter] = useState<Set<string>>(new Set());
+  const [showPlayerFilter, setShowPlayerFilter] = useState(false);
+
+  // Every player appearing anywhere in the schedule, with how many
+  // fixtures (games) they're scheduled for — this is what "how many
+  // games has been scheduled for that player" is actually answering.
+  const playerKey = (p: RosterPlayer) => p.email || p.name;
+  const allPlayersWithCounts = useMemo(() => {
+    const counts = new Map<string, { name: string; count: number }>();
+    for (const w of schedule?.weeks || []) {
+      if (w.skipped) continue;
+      for (const f of w.fixtures) {
+        for (const p of [...f.teamAPlayers, ...f.teamBPlayers]) {
+          const key = playerKey(p);
+          if (!counts.has(key)) counts.set(key, { name: p.name, count: 0 });
+          counts.get(key)!.count += 1;
+        }
+      }
+    }
+    return Array.from(counts.entries()).map(([key, v]) => ({ key, ...v })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [schedule]);
+
+  const togglePlayerFilter = (key: string) => {
+    setPlayerFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const fixtureMatchesFilter = (f: ScheduleFixture) =>
+    playerFilter.size === 0 || [...f.teamAPlayers, ...f.teamBPlayers].some((p) => playerFilter.has(playerKey(p)));
 
   // Polls for every currently-live match across the whole tournament —
   // separate from the single-fixture poll inside LiveScoreboardModal
@@ -1155,14 +1229,21 @@ const SchedulePanel: React.FC<{
     return null;
   };
 
-  const canControlFixture = (fixtureId: string) => {
+  // Matches the backend's assertTournamentParticipant rule for live
+  // scoring — registered ANYWHERE in the tournament (player pool or any
+  // team roster), not just the specific fixture in question. Kept
+  // separate from fixture-level participant checks (used for chat),
+  // which intentionally stay narrower.
+  const isRegisteredInTournament = useMemo(() => {
     if (isAdmin) return true;
-    const loc = findFixtureLocation(fixtureId);
-    if (!loc || !schedule) return false;
-    const f = schedule.weeks[loc.weekIdx].fixtures[loc.fixtureIdx];
     const myEmail = (currentUser?.email || '').trim().toLowerCase();
-    return [...f.teamAPlayers, ...f.teamBPlayers].some((p) => p.email && p.email === myEmail);
-  };
+    if (!myEmail) return false;
+    const inPool = (tour.playerPool || []).some((p) => p.email && p.email.toLowerCase() === myEmail);
+    const onAnyRoster = (tour.teams || []).some((team) => (team.players || []).some((p) => p.email && p.email.toLowerCase() === myEmail));
+    return inPool || onAnyRoster;
+  }, [isAdmin, currentUser?.email, tour.playerPool, tour.teams]);
+
+  const canControlFixture = (_fixtureId: string) => isRegisteredInTournament;
   const [showGenerator, setShowGenerator] = useState(false);
 
   // MLP-style events run as same-day/short-interval "Rounds"; standard
@@ -1172,13 +1253,40 @@ const SchedulePanel: React.FC<{
 
   const matchById = new Map(matches.map((m) => [m.id, m]));
 
+  // Matches already attached to SOME fixture, anywhere in the schedule —
+  // used to find matches that exist in Match History but got orphaned
+  // by the old linking race condition (fixed now, but doesn't heal data
+  // that was already affected before the fix went in).
+  const linkedMatchIds = new Set(
+    (schedule?.weeks || []).flatMap((w) => w.fixtures.map((f) => f.matchId).filter(Boolean))
+  );
+  const candidateMatchesFor = (f: ScheduleFixture): TournamentMatch[] => {
+    const teamPair = [String(f.teamAId), String(f.teamBId)].sort();
+    const candidates = matches.filter((m) => {
+      if (linkedMatchIds.has(m.id)) return false;
+      return [String(m.teamAId), String(m.teamBId)].sort().join('|') === teamPair.join('|');
+    });
+    // If this fixture has specific players assigned, prefer matches
+    // recorded with that exact pairing — with several fixtures between
+    // the same two teams (common in MLP-style formats), team alone is
+    // too ambiguous to be a useful suggestion on its own.
+    if (f.teamAPlayers.length > 0 || f.teamBPlayers.length > 0) {
+      const fixtureKeys = [...f.teamAPlayers, ...f.teamBPlayers].map(playerKey).sort().join('|');
+      const exact = candidates.filter((m) => {
+        const matchKeys = [...(m.teamAPlayers || []), ...(m.teamBPlayers || [])].map(playerKey).sort().join('|');
+        return matchKeys === fixtureKeys && fixtureKeys !== '';
+      });
+      if (exact.length > 0) return exact;
+    }
+    return candidates;
+  };
+
   const linkFixtureToMatch = async (weekIdx: number, fixtureIdx: number, matchId: string) => {
     if (!schedule) return;
-    const weeks = schedule.weeks.map((w, wi) =>
-      wi !== weekIdx ? w : { ...w, fixtures: w.fixtures.map((f, fi) => (fi !== fixtureIdx ? f : { ...f, matchId })) }
-    );
+    const fixtureId = schedule.weeks[weekIdx]?.fixtures[fixtureIdx]?.fixtureId;
+    if (!fixtureId) return;
     try {
-      await api.saveTournamentSchedule(tour.id, weeks);
+      await api.linkFixtureMatch(tour.id, fixtureId, matchId);
     } catch (e) {
       console.error('Failed to link fixture to match:', e);
     }
@@ -1235,24 +1343,70 @@ const SchedulePanel: React.FC<{
       )}
 
     <div className="bg-white border border-light-border rounded-2xl p-5 shadow-sm space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-display text-[10px] font-medium text-slate-gray tracking-widest uppercase">
           {tour.format === 'mlp_singles' ? 'Round-by-Round Plan' : 'Weekly Fixture Plan'}
         </h3>
-        {isAdmin && (
-          <button
-            onClick={() => setShowGenerator(!showGenerator)}
-            className="px-3 py-1.5 rounded-lg bg-court-green/10 border border-court-green/20 text-court-green text-[10px] font-bold font-mono uppercase tracking-wider cursor-pointer hover:bg-court-green/20 transition-all"
-          >
-            {showGenerator ? 'Cancel' : schedule && schedule.weeks.length > 0 ? 'Regenerate Schedule' : `Generate ${periodLabel}s`}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {allPlayersWithCounts.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setShowPlayerFilter(!showPlayerFilter)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] font-bold font-mono uppercase tracking-wider cursor-pointer transition-all ${
+                  playerFilter.size > 0 ? 'bg-court-green text-white border-court-green' : 'bg-off-white border-light-border text-slate-gray hover:text-charcoal'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                {playerFilter.size > 0 ? `${playerFilter.size} Player${playerFilter.size > 1 ? 's' : ''}` : 'Filter by Player'}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+
+              {showPlayerFilter && (
+                <div className="absolute right-0 mt-2 w-64 max-h-80 overflow-y-auto bg-white border border-light-border rounded-2xl shadow-2xl z-30 p-2">
+                  {playerFilter.size > 0 && (
+                    <button
+                      onClick={() => setPlayerFilter(new Set())}
+                      className="w-full text-left text-[10px] font-bold font-mono uppercase text-court-green hover:underline cursor-pointer px-2 py-1.5"
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                  {allPlayersWithCounts.map((p) => (
+                    <label key={p.key} className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg hover:bg-off-white cursor-pointer">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <input type="checkbox" checked={playerFilter.has(p.key)} onChange={() => togglePlayerFilter(p.key)} />
+                        <span className="truncate text-charcoal">{p.name}</span>
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-gray shrink-0">{p.count} game{p.count === 1 ? '' : 's'}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setShowGenerator(!showGenerator)}
+              className="px-3 py-1.5 rounded-lg bg-court-green/10 border border-court-green/20 text-court-green text-[10px] font-bold font-mono uppercase tracking-wider cursor-pointer hover:bg-court-green/20 transition-all"
+            >
+              {showGenerator ? 'Cancel' : schedule && schedule.weeks.length > 0 ? 'Regenerate Schedule' : `Generate ${periodLabel}s`}
+            </button>
+          )}
+        </div>
       </div>
+
+      {playerFilter.size > 0 && (
+        <p className="text-[10px] font-mono text-court-green bg-court-green/5 border border-court-green/20 rounded-lg px-3 py-2">
+          Showing games for: {allPlayersWithCounts.filter((p) => playerFilter.has(p.key)).map((p) => `${p.name} (${p.count})`).join(', ')}
+        </p>
+      )}
 
       {showGenerator && (
         <ScheduleGenerator
           tour={tour}
           periodLabel={periodLabel}
+          schedule={schedule}
+          matches={matches}
           api={api}
           onGenerated={() => { setShowGenerator(false); onChanged(); }}
         />
@@ -1274,16 +1428,22 @@ const SchedulePanel: React.FC<{
               </div>
               {!w.skipped && (
                 <div className="space-y-1.5">
+                  {w.fixtures.every((f) => !fixtureMatchesFilter(f)) && playerFilter.size > 0 && (
+                    <p className="text-[10px] text-slate-gray font-mono py-2">No games for the selected player(s) this round.</p>
+                  )}
                   {w.fixtures.map((f, fixtureIdx) => {
+                    if (!fixtureMatchesFilter(f)) return null;
                     const teamA = (tour.teams || []).find(t => t.id === f.teamAId);
                     const teamB = (tour.teams || []).find(t => t.id === f.teamBId);
                     const recordedMatch = f.matchId ? matchById.get(f.matchId) : undefined;
                     const myEmail = (currentUser?.email || '').trim().toLowerCase();
                     const isParticipant = [...f.teamAPlayers, ...f.teamBPlayers].some((p) => p.email && p.email === myEmail);
                     const canChat = isAuthenticated && (isAdmin || isParticipant) && !!f.fixtureId;
+                    const canGoLive = isAuthenticated && isRegisteredInTournament && !!f.fixtureId;
 
                     return (
-                      <div key={fixtureIdx} className="flex items-stretch gap-1.5">
+                      <div key={fixtureIdx} className="space-y-1">
+                        <div className="flex items-stretch gap-1.5">
                         <button
                           onClick={() => isAuthenticated && !recordedMatch && setRecordingFixture({ weekIdx, fixtureIdx })}
                           disabled={!isAuthenticated || !!recordedMatch}
@@ -1317,7 +1477,7 @@ const SchedulePanel: React.FC<{
                             <MessageCircle className="w-4 h-4" />
                           </button>
                         )}
-                        {canChat && !recordedMatch && (
+                        {canGoLive && !recordedMatch && (
                           <button
                             onClick={() => setLiveFixture({ weekIdx, fixtureIdx })}
                             title="Go live with courtside scoring"
@@ -1326,6 +1486,31 @@ const SchedulePanel: React.FC<{
                             <Radio className="w-4 h-4" />
                           </button>
                         )}
+                        </div>
+
+                        {!recordedMatch && (() => {
+                          const candidates = candidateMatchesFor(f);
+                          if (candidates.length === 0) return null;
+                          return (
+                            <details className="bg-off-white border border-light-border rounded-lg px-2.5 py-1.5">
+                              <summary className="text-[9px] font-mono font-bold text-slate-gray uppercase cursor-pointer select-none">
+                                {candidates.length} match{candidates.length > 1 ? 'es' : ''} in history look{candidates.length === 1 ? 's' : ''} like this fixture
+                              </summary>
+                              <div className="space-y-1 mt-1.5">
+                                {candidates.map((m) => (
+                                  <button
+                                    key={m.id}
+                                    onClick={async () => { await linkFixtureToMatch(weekIdx, fixtureIdx, m.id); onChanged(); }}
+                                    className="w-full flex items-center justify-between text-[10px] bg-white rounded-lg px-2 py-1.5 cursor-pointer hover:bg-off-white transition-all"
+                                  >
+                                    <span className="text-slate-gray truncate">{m.date} &middot; {m.scoreA}-{m.scoreB}</span>
+                                    <span className="font-bold text-court-green shrink-0 ml-2">Link</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </details>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -1590,15 +1775,17 @@ const FixtureChatModal: React.FC<{ tour: Tournament; fixtureId: string; label: s
   );
 };
 
-const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: any; onGenerated: () => void }> = ({ tour, periodLabel, api, onGenerated }) => {
+const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; schedule: TournamentSchedule | null; matches: TournamentMatch[]; api: any; onGenerated: () => void }> = ({ tour, periodLabel, schedule, matches, api, onGenerated }) => {
   const teams = tour.teams || [];
   const allPlayers = teams.flatMap((t) => t.players);
+  const playerKey = (p: RosterPlayer) => p.email || p.name;
 
   // Singles-format tournaments default to a full PLAYER-vs-PLAYER round
   // robin (every player faces every other player at least once) rather
   // than team-vs-team, since a "team" in a singles event is often just a
   // single player anyway. Doubles/standard tournaments still pair teams.
   const [pairBy, setPairBy] = useState<'teams' | 'players'>(tour.format === 'mlp_singles' ? 'players' : 'teams');
+  const [mode, setMode] = useState<'round_robin' | 'swiss' | 'level_restricted' | 'line_match'>('round_robin');
 
   const fullRoundCount = (n: number) => (n < 2 ? 0 : n % 2 === 0 ? n - 1 : n);
 
@@ -1611,6 +1798,273 @@ const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: 
   const [court, setCourt] = useState('Court 1');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // ---- Swiss bracket: winners face winners, losers face losers, every
+  // round, no eliminations. Generated one round at a time (unlike round
+  // robin, which can be planned entirely upfront) since each round's
+  // pairings depend on results that don't exist until the previous
+  // round has actually been played and recorded.
+  const entrantId = (e: { id: string } | RosterPlayer) => ('id' in e ? e.id : playerKey(e));
+
+  const swissEntrants = useMemo(() => {
+    if (pairBy === 'teams') {
+      const wins = new Map<string, number>(teams.map((t) => [t.id, 0]));
+      for (const m of matches) {
+        if (!m.winnerTeamId || m.winnerTeamId === 'TIE') continue;
+        if (wins.has(m.winnerTeamId)) wins.set(m.winnerTeamId, (wins.get(m.winnerTeamId) || 0) + 1);
+      }
+      return teams.map((t) => ({ id: t.id, label: t.name, wins: wins.get(t.id) || 0 }));
+    }
+    const wins = new Map<string, number>(allPlayers.map((p) => [playerKey(p), 0]));
+    for (const m of matches) {
+      const aP = m.teamAPlayers || [], bP = m.teamBPlayers || [];
+      if (aP.length !== 1 || bP.length !== 1) continue; // only true 1v1 singles results count here
+      if (!m.winnerTeamId || m.winnerTeamId === 'TIE') continue;
+      const winnerKey = String(m.winnerTeamId) === String(m.teamAId) ? playerKey(aP[0]) : playerKey(bP[0]);
+      if (wins.has(winnerKey)) wins.set(winnerKey, (wins.get(winnerKey) || 0) + 1);
+    }
+    return allPlayers.map((p) => ({ id: playerKey(p), label: p.name, wins: wins.get(playerKey(p)) || 0 }));
+  }, [pairBy, teams, allPlayers, matches]);
+
+  const previousMatchups = useMemo(() => {
+    const set = new Set<string>();
+    for (const w of schedule?.weeks || []) {
+      for (const f of w.fixtures) {
+        const aKey = pairBy === 'teams' ? f.teamAId : (f.teamAPlayers[0] ? playerKey(f.teamAPlayers[0]) : f.teamAId);
+        const bKey = pairBy === 'teams' ? f.teamBId : (f.teamBPlayers[0] ? playerKey(f.teamBPlayers[0]) : f.teamBId);
+        set.add([aKey, bKey].sort().join('|'));
+      }
+    }
+    return set;
+  }, [schedule, pairBy]);
+
+  // Greedy Swiss pairing: sort by current wins (score groups), pair
+  // adjacent unpaired entrants within/near the same group, preferring
+  // opponents not already played. Falls back to allowing a rematch
+  // rather than leaving someone unpaired — a repeat matchup is a far
+  // smaller problem than someone sitting out unexpectedly.
+  function swissPairing(entrants: { id: string; label: string; wins: number }[]) {
+    const sorted = [...entrants].sort((a, b) => b.wins - a.wins);
+    const paired = new Set<string>();
+    const pairs: [typeof sorted[number], typeof sorted[number]][] = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (paired.has(sorted[i].id)) continue;
+      let opponentIdx = -1;
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (paired.has(sorted[j].id)) continue;
+        const key = [sorted[i].id, sorted[j].id].sort().join('|');
+        if (!previousMatchups.has(key)) { opponentIdx = j; break; }
+      }
+      if (opponentIdx === -1) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          if (!paired.has(sorted[j].id)) { opponentIdx = j; break; }
+        }
+      }
+      if (opponentIdx !== -1) {
+        pairs.push([sorted[i], sorted[opponentIdx]]);
+        paired.add(sorted[i].id);
+        paired.add(sorted[opponentIdx].id);
+      }
+    }
+    const bye = sorted.find((e) => !paired.has(e.id));
+    return { pairs, bye };
+  }
+
+  const playerToTeamId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of teams) for (const p of t.players) map.set(playerKey(p), t.id);
+    return map;
+  }, [teams]);
+
+  const roundsGenerated = (schedule?.weeks || []).length;
+  const [swissDate, setSwissDate] = useState(tour.startDate || '');
+  const [swissCourt, setSwissCourt] = useState('Court 1');
+  const [swissSubmitting, setSwissSubmitting] = useState(false);
+  const [swissError, setSwissError] = useState<string | null>(null);
+  const [lastPreview, setLastPreview] = useState<{ pairs: [{ label: string }, { label: string }][]; bye?: { label: string } } | null>(null);
+
+  const generateNextRound = async () => {
+    setSwissError(null);
+    if (!swissDate) { setSwissError('Pick a date for this round.'); return; }
+    if (swissEntrants.length < 2) { setSwissError(pairBy === 'teams' ? 'Save at least 2 teams first.' : 'No players found — check Teams & Roster.'); return; }
+
+    const { pairs, bye } = swissPairing(swissEntrants);
+    setLastPreview({ pairs: pairs.map(([a, b]) => [{ label: a.label }, { label: b.label }]), bye: bye ? { label: bye.label } : undefined });
+
+    const fixtures = pairs.map(([a, b]) => {
+      if (pairBy === 'teams') {
+        return { fixtureId: crypto.randomUUID(), teamAId: a.id, teamBId: b.id, teamAPlayers: [] as RosterPlayer[], teamBPlayers: [] as RosterPlayer[] };
+      }
+      const playerA = allPlayers.find((p) => playerKey(p) === a.id)!;
+      const playerB = allPlayers.find((p) => playerKey(p) === b.id)!;
+      return {
+        fixtureId: crypto.randomUUID(),
+        teamAId: playerToTeamId.get(a.id) || '',
+        teamBId: playerToTeamId.get(b.id) || '',
+        teamAPlayers: [playerA],
+        teamBPlayers: [playerB],
+      };
+    });
+
+    setSwissSubmitting(true);
+    try {
+      const newWeek = { week: roundsGenerated + 1, date: swissDate, fixtures: fixtures.map((f) => ({ ...f, court: swissCourt, gameType: (pairBy === 'players' ? 'singles' : 'doubles') as const, matchId: '' })) };
+      const weeks = [...(schedule?.weeks || []), newWeek];
+      await api.saveTournamentSchedule(tour.id, weeks);
+      onGenerated();
+    } catch (err: any) {
+      setSwissError(err?.message || 'Failed to generate the next round.');
+    } finally {
+      setSwissSubmitting(false);
+    }
+  };
+
+  // ---- Level-Restricted: L1/L2 players only ever face other L1/L2,
+  // L3/L4 only ever face other L3/L4 — two independent round-robins run
+  // within each level group, then merged round-by-round into one
+  // combined schedule. (circleMethod is defined just below, but that's
+  // fine — this function only calls it once actually invoked later,
+  // well after the whole component body has finished evaluating.)
+  const [levelError, setLevelError] = useState<string | null>(null);
+  const [levelSubmitting, setLevelSubmitting] = useState(false);
+
+  const leveledPlayers = allPlayers.filter((p) => p.level);
+  const groupA = leveledPlayers.filter((p) => p.level === 1 || p.level === 2); // L1/L2
+  const groupB = leveledPlayers.filter((p) => p.level === 3 || p.level === 4); // L3/L4
+
+  const submitLevelRestricted = async () => {
+    setLevelError(null);
+    if (!startDate) { setLevelError('Pick a start date.'); return; }
+    if (groupA.length < 2 && groupB.length < 2) {
+      setLevelError('Assign levels (L1-L4) to at least 2 players within the same group (L1/L2 or L3/L4) first, in Teams & Roster.');
+      return;
+    }
+
+    const roundsA = circleMethod(groupA.map(playerKey));
+    const roundsB = circleMethod(groupB.map(playerKey));
+    const totalRounds = Math.max(roundsA.length, roundsB.length);
+    if (totalRounds === 0) { setLevelError('Not enough players with levels assigned to generate any fixtures.'); return; }
+
+    const byKey = new Map(leveledPlayers.map((p) => [playerKey(p), p]));
+    const weeks: { week: number; date: string; fixtures: any[] }[] = [];
+
+    for (let r = 0; r < totalRounds; r++) {
+      const fixtures: any[] = [];
+      for (const pairs of [roundsA[r] || [], roundsB[r] || []]) {
+        for (const [aKey, bKey] of pairs) {
+          const a = byKey.get(aKey), b = byKey.get(bKey);
+          if (!a || !b) continue;
+          fixtures.push({
+            fixtureId: crypto.randomUUID(),
+            teamAId: playerToTeamId.get(aKey) || '',
+            teamBId: playerToTeamId.get(bKey) || '',
+            teamAPlayers: [a],
+            teamBPlayers: [b],
+            court,
+            gameType: 'singles',
+            matchId: '',
+          });
+        }
+      }
+      if (fixtures.length === 0) continue;
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + r * daysBetween);
+      weeks.push({ week: weeks.length + 1, date: d.toISOString().slice(0, 10), fixtures });
+    }
+
+    setLevelSubmitting(true);
+    try {
+      await api.saveTournamentSchedule(tour.id, weeks);
+      onGenerated();
+    } catch (err: any) {
+      setLevelError(err?.message || 'Failed to generate the level-restricted schedule.');
+    } finally {
+      setLevelSubmitting(false);
+    }
+  };
+
+  // ---- Line Level Matches: teams face each other round-robin, and
+  // for every team matchup, each team's Line 1 (level-1 player(s)) faces
+  // the opponent's Line 1, Line 2 faces Line 2, and so on — reusing the
+  // SAME level field as Level-Restricted mode above, just applied
+  // within a team matchup instead of across the whole player pool.
+  // Whichever team has more than one player at a given level plays that
+  // line as doubles; exactly one player at that level plays it singles.
+  const [lineError, setLineError] = useState<string | null>(null);
+  // How long the weekly line-match cycle keeps running for, in weeks —
+  // separate from the round-robin cycle length itself. A round-robin
+  // among N teams only naturally produces N-1 unique rounds before
+  // every matchup repeats; running this "every week for 6 months"
+  // means cycling back through those same matchups again once the
+  // first full cycle is done, not stopping there.
+  const [lineDurationWeeks, setLineDurationWeeks] = useState(8);
+  const [lineDurationCustom, setLineDurationCustom] = useState('');
+  const [lineSubmitting, setLineSubmitting] = useState(false);
+  const LINES = [1, 2, 3, 4] as const;
+
+  const lineGapsByTeam = teams.map((t) => ({
+    team: t,
+    missing: LINES.filter((l) => t.players.filter((p) => p.level === l).length === 0),
+  }));
+
+  const submitLineMatch = async () => {
+    setLineError(null);
+    if (!startDate) { setLineError('Pick a start date.'); return; }
+    if (teams.length < 2) { setLineError('Save at least 2 teams first.'); return; }
+    if (lineDurationWeeks < 1) { setLineError('Duration must be at least 1 week.'); return; }
+
+    const teamRoundsForLines = circleMethod(teams.map((t) => t.id));
+    if (teamRoundsForLines.length === 0) { setLineError('Could not generate fixtures.'); return; }
+
+    const byId = new Map(teams.map((t) => [t.id, t]));
+    const weeks: { week: number; date: string; fixtures: any[] }[] = [];
+
+    // Cycle back through the same round-robin matchups (r % cycle
+    // length) for as many weeks as requested — a 6-team round robin is
+    // only 5 unique rounds, but "every week for 6 months" needs ~26.
+    for (let r = 0; r < lineDurationWeeks; r++) {
+      const pairs = teamRoundsForLines[r % teamRoundsForLines.length];
+      const fixtures: any[] = [];
+      for (const [aId, bId] of pairs) {
+        const teamA = byId.get(aId), teamB = byId.get(bId);
+        if (!teamA || !teamB) continue;
+        for (const line of LINES) {
+          const aLinePlayers = teamA.players.filter((p) => p.level === line);
+          const bLinePlayers = teamB.players.filter((p) => p.level === line);
+          if (aLinePlayers.length === 0 || bLinePlayers.length === 0) continue; // no fixture if either side has nobody assigned to this line
+          fixtures.push({
+            fixtureId: crypto.randomUUID(),
+            teamAId: aId,
+            teamBId: bId,
+            teamAPlayers: aLinePlayers,
+            teamBPlayers: bLinePlayers,
+            court,
+            gameType: aLinePlayers.length > 1 || bLinePlayers.length > 1 ? 'doubles' : 'singles',
+            matchId: '',
+          });
+        }
+      }
+      if (fixtures.length === 0) continue;
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + r * daysBetween);
+      weeks.push({ week: weeks.length + 1, date: d.toISOString().slice(0, 10), fixtures });
+    }
+
+    if (weeks.length === 0) {
+      setLineError('No line matchups could be generated — assign Line numbers (1-4) to players in Teams & Roster first.');
+      return;
+    }
+
+    setLineSubmitting(true);
+    try {
+      await api.saveTournamentSchedule(tour.id, weeks);
+      onGenerated();
+    } catch (err: any) {
+      setLineError(err?.message || 'Failed to generate the line-match schedule.');
+    } finally {
+      setLineSubmitting(false);
+    }
+  };
 
   // Circle-method round-robin: rotates all-but-one entrant around a fixed
   // anchor each round, pairing opposite ends of the remaining sequence.
@@ -1705,6 +2159,228 @@ const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: 
 
   return (
     <div className="bg-off-white border border-light-border rounded-xl p-4 space-y-3">
+      <div className="flex bg-white p-1 rounded-lg border border-light-border w-fit">
+        <button
+          type="button"
+          onClick={() => setMode('round_robin')}
+          className={`px-3 py-1.5 text-[10px] font-bold font-mono uppercase rounded-md transition-all cursor-pointer ${mode === 'round_robin' ? 'bg-deep-navy text-white' : 'text-slate-gray'}`}
+        >Round Robin</button>
+        <button
+          type="button"
+          onClick={() => setMode('swiss')}
+          className={`px-3 py-1.5 text-[10px] font-bold font-mono uppercase rounded-md transition-all cursor-pointer ${mode === 'swiss' ? 'bg-deep-navy text-white' : 'text-slate-gray'}`}
+        >Swiss Bracket</button>
+        <button
+          type="button"
+          onClick={() => setMode('level_restricted')}
+          className={`px-3 py-1.5 text-[10px] font-bold font-mono uppercase rounded-md transition-all cursor-pointer ${mode === 'level_restricted' ? 'bg-deep-navy text-white' : 'text-slate-gray'}`}
+        >Level-Restricted</button>
+        <button
+          type="button"
+          onClick={() => setMode('line_match')}
+          className={`px-3 py-1.5 text-[10px] font-bold font-mono uppercase rounded-md transition-all cursor-pointer ${mode === 'line_match' ? 'bg-deep-navy text-white' : 'text-slate-gray'}`}
+        >Line Level Matches</button>
+      </div>
+
+      {mode === 'line_match' ? (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-gray leading-relaxed">
+            Teams face each other round-robin, and for every matchup, each team's Line 1 plays the opponent's Line 1, Line 2 plays Line 2, and so on. Uses the same Line/Level numbers from Teams &amp; Roster (a team's Line N is whoever's assigned level {`N`} there — two players at the same level play that line as doubles, one plays it singles).
+          </p>
+
+          {lineError && <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl">{lineError}</p>}
+
+          <div className="bg-white border border-light-border rounded-lg p-3 space-y-1.5 max-h-40 overflow-y-auto">
+            <p className="text-[10px] font-mono font-bold text-slate-gray uppercase">Lines set per team</p>
+            {lineGapsByTeam.map(({ team, missing }) => (
+              <div key={team.id} className="text-[10px] font-mono flex items-center gap-1.5">
+                <span className="font-bold text-charcoal">{team.name}:</span>
+                {LINES.map((l) => {
+                  const count = team.players.filter((p) => p.level === l).length;
+                  return (
+                    <span key={l} className={`px-1.5 py-0.5 rounded ${count > 0 ? 'bg-court-green/10 text-court-green' : 'bg-red-50 text-red-500'}`}>
+                      L{l}{count > 0 ? ` (${count})` : ' missing'}
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+            <p className="text-[9px] text-slate-gray pt-1">A team missing a line just skips that line's fixture against every opponent — it doesn't block the rest from generating.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Start Date</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Default Court</label>
+              <input value={court} onChange={(e) => setCourt(e.target.value)} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Match Frequency (days between rounds)</label>
+            <input type="number" min={1} max={30} value={daysBetween} onChange={(e) => setDaysBetween(Number(e.target.value))} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2" />
+            <span className="text-[9px] text-slate-gray font-mono">7 = weekly (typical for this format), 14 = every other week</span>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Run For</label>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: '2 Months', weeks: 8 },
+                { label: '3 Months', weeks: 13 },
+                { label: '6 Months', weeks: 26 },
+                { label: '1 Year', weeks: 52 },
+              ].map((opt) => (
+                <button
+                  key={opt.weeks}
+                  type="button"
+                  onClick={() => { setLineDurationWeeks(opt.weeks); setLineDurationCustom(''); }}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold font-mono uppercase cursor-pointer transition-all ${
+                    lineDurationWeeks === opt.weeks && !lineDurationCustom ? 'bg-court-green text-white' : 'bg-white border border-light-border text-slate-gray hover:text-charcoal'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={104}
+                  placeholder="Custom"
+                  value={lineDurationCustom}
+                  onChange={(e) => { setLineDurationCustom(e.target.value); const n = Number(e.target.value); if (n > 0) setLineDurationWeeks(n); }}
+                  className="w-20 text-[10px] font-mono bg-white border border-light-border rounded-lg px-2 py-1.5"
+                />
+                <span className="text-[9px] text-slate-gray font-mono">weeks</span>
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-gray font-mono">
+              Generates {lineDurationWeeks} round{lineDurationWeeks === 1 ? '' : 's'} total, every {daysBetween} day{daysBetween === 1 ? '' : 's'}. With {teams.length} teams, one full round-robin cycle is {Math.max(0, teams.length - 1)} round{teams.length - 1 === 1 ? '' : 's'} — {lineDurationWeeks > Math.max(0, teams.length - 1) ? 'the same matchups repeat once the cycle finishes, to keep going for the full duration.' : 'this fits within a single cycle.'}
+            </p>
+          </div>
+
+          <button
+            onClick={submitLineMatch}
+            disabled={lineSubmitting}
+            className="w-full py-2.5 rounded-xl bg-court-green hover:bg-[#235F3A] text-white text-xs font-bold font-mono uppercase transition-all cursor-pointer disabled:opacity-60"
+          >
+            {lineSubmitting ? 'Generating...' : `Generate ${lineDurationWeeks}-Week Schedule`}
+          </button>
+        </div>
+      ) : mode === 'level_restricted' ? (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-gray leading-relaxed">
+            L1 and L2 players only ever play each other; L3 and L4 players only ever play each other. Assign each player a level first, in Teams &amp; Roster (each player's row has a level dropdown, admin only).
+          </p>
+
+          {levelError && <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl">{levelError}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white border border-light-border rounded-lg p-3 space-y-1">
+              <p className="text-[10px] font-mono font-bold text-slate-gray uppercase">L1 / L2 Group ({groupA.length})</p>
+              <div className="flex flex-wrap gap-1">
+                {groupA.length === 0 ? <span className="text-[10px] text-slate-gray">No L1/L2 players assigned yet.</span> : groupA.map((p) => (
+                  <span key={playerKey(p)} className="text-[9px] font-mono bg-off-white border border-light-border px-1.5 py-0.5 rounded">{p.name} <span className="text-court-green font-bold">L{p.level}</span></span>
+                ))}
+              </div>
+            </div>
+            <div className="bg-white border border-light-border rounded-lg p-3 space-y-1">
+              <p className="text-[10px] font-mono font-bold text-slate-gray uppercase">L3 / L4 Group ({groupB.length})</p>
+              <div className="flex flex-wrap gap-1">
+                {groupB.length === 0 ? <span className="text-[10px] text-slate-gray">No L3/L4 players assigned yet.</span> : groupB.map((p) => (
+                  <span key={playerKey(p)} className="text-[9px] font-mono bg-off-white border border-light-border px-1.5 py-0.5 rounded">{p.name} <span className="text-court-green font-bold">L{p.level}</span></span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Start Date</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Default Court</label>
+              <input value={court} onChange={(e) => setCourt(e.target.value)} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Days Between Rounds</label>
+            <input type="number" min={0} max={30} value={daysBetween} onChange={(e) => setDaysBetween(Number(e.target.value))} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2" />
+          </div>
+
+          <button
+            onClick={submitLevelRestricted}
+            disabled={levelSubmitting}
+            className="w-full py-2.5 rounded-xl bg-court-green hover:bg-[#235F3A] text-white text-xs font-bold font-mono uppercase transition-all cursor-pointer disabled:opacity-60"
+          >
+            {levelSubmitting ? 'Generating...' : 'Generate Level-Restricted Schedule'}
+          </button>
+        </div>
+      ) : mode === 'swiss' ? (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-gray leading-relaxed">
+            No eliminations — everyone plays every round. Each new round, winners are paired against other winners and losers against other losers, based on results so far. Generated one round at a time, since each round depends on the previous one's results being recorded first.
+          </p>
+
+          <div className="flex bg-white p-1 rounded-lg border border-light-border w-fit">
+            <button
+              type="button"
+              onClick={() => setPairBy('teams')}
+              className={`px-3 py-1.5 text-[10px] font-bold font-mono uppercase rounded-md transition-all cursor-pointer ${pairBy === 'teams' ? 'bg-deep-navy text-white' : 'text-slate-gray'}`}
+            >Doubles (Team vs Team)</button>
+            <button
+              type="button"
+              onClick={() => setPairBy('players')}
+              className={`px-3 py-1.5 text-[10px] font-bold font-mono uppercase rounded-md transition-all cursor-pointer ${pairBy === 'players' ? 'bg-deep-navy text-white' : 'text-slate-gray'}`}
+            >Singles (Player vs Player)</button>
+          </div>
+
+          {swissError && <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl">{swissError}</p>}
+
+          <div className="bg-white border border-light-border rounded-lg p-3 space-y-1.5">
+            <p className="text-[10px] font-mono font-bold text-slate-gray uppercase">Current Standings {roundsGenerated > 0 ? `(after Round ${roundsGenerated})` : '(Round 1 — not played yet)'}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {[...swissEntrants].sort((a, b) => b.wins - a.wins).map((e) => (
+                <span key={e.id} className="text-[10px] font-mono bg-off-white border border-light-border px-2 py-1 rounded">{e.label} <span className="font-bold text-court-green">{e.wins}W</span></span>
+              ))}
+            </div>
+          </div>
+
+          {lastPreview && (
+            <div className="bg-court-green/5 border border-court-green/20 rounded-lg p-3 space-y-1">
+              <p className="text-[10px] font-mono font-bold text-court-green uppercase">Round {roundsGenerated} pairings just generated</p>
+              {lastPreview.pairs.map((p, i) => (
+                <p key={i} className="text-xs text-charcoal">{p[0].label} <span className="text-slate-gray">vs</span> {p[1].label}</p>
+              ))}
+              {lastPreview.bye && <p className="text-xs text-slate-gray">{lastPreview.bye.label} — bye this round</p>}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-mono uppercase text-slate-gray font-bold">Round {roundsGenerated + 1} Date</label>
+              <input type="date" value={swissDate} onChange={(e) => setSwissDate(e.target.value)} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2.5" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-mono uppercase text-slate-gray font-bold">Court</label>
+              <input value={swissCourt} onChange={(e) => setSwissCourt(e.target.value)} className="w-full text-xs bg-white border border-light-border rounded-lg px-3 py-2.5" />
+            </div>
+          </div>
+
+          <button
+            onClick={generateNextRound}
+            disabled={swissSubmitting}
+            className="w-full py-2.5 rounded-xl bg-court-green hover:bg-[#235F3A] text-white text-xs font-bold font-mono uppercase transition-all cursor-pointer disabled:opacity-60"
+          >
+            {swissSubmitting ? 'Generating...' : `Generate Round ${roundsGenerated + 1}`}
+          </button>
+        </div>
+      ) : (
+      <>
       {error && <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl">{error}</p>}
       <p className="text-xs text-slate-gray leading-relaxed">
         Generates a round-robin plan. This replaces any existing schedule — already-recorded matches stay untouched.
@@ -1752,6 +2428,8 @@ const ScheduleGenerator: React.FC<{ tour: Tournament; periodLabel: string; api: 
       <button onClick={submit} disabled={submitting} className="w-full py-2.5 rounded-xl bg-court-green hover:bg-[#235F3A] text-white text-xs font-bold font-mono uppercase transition-all cursor-pointer disabled:opacity-60">
         {submitting ? 'Generating...' : `Generate ${periodLabel} Schedule`}
       </button>
+      </>
+      )}
     </div>
   );
 };
@@ -1804,6 +2482,18 @@ const RegistrationsPanel: React.FC<{ tour: Tournament; registrations: Tournament
 // ---------------- Playoffs (admin) ----------------
 const PlayoffsPanel: React.FC<{ tour: Tournament; api: any; onChanged: () => void }> = ({ tour, api, onChanged }) => {
   const [error, setError] = useState<string | null>(null);
+  const [recordingSlot, setRecordingSlot] = useState<'semifinal1' | 'semifinal2' | 'championship' | 'thirdPlace' | null>(null);
+  const [matchesById, setMatchesById] = useState<Map<string, TournamentMatch>>(new Map());
+
+  // Fetched independently of whichever tab loaded last — Match History
+  // is lazy-loaded per-tab, so it isn't reliably populated yet just
+  // because someone opened Playoffs directly.
+  useEffect(() => {
+    api.listTournamentMatches(tour.id).then((r: any) => {
+      setMatchesById(new Map((r.items || []).map((m: TournamentMatch) => [String(m.id), m])));
+    }).catch(() => {});
+  }, [tour.id, tour.playoffs]);
+
   const generate = async () => {
     try { await api.generatePlayoffs(tour.id); onChanged(); } catch (e: any) { setError(e?.message || 'Failed to generate bracket.'); }
   };
@@ -1812,9 +2502,49 @@ const PlayoffsPanel: React.FC<{ tour: Tournament; api: any; onChanged: () => voi
   };
   const teamName = (id: string) => (tour.teams || []).find(t => t.id === id)?.name || 'TBD';
 
+  // Mirrors the backend's tallyWinner exactly: match wins first, then
+  // point differential, then total points scored, as fallbacks — so the
+  // UI never shows "tied" when the backend would actually resolve a
+  // winner on points, and vice versa.
+  const tallySlot = (s: { teamAId: string; teamBId: string; matchIds: string[] } | undefined) => {
+    const recorded = (s?.matchIds || []).map((id) => matchesById.get(id)).filter(Boolean) as TournamentMatch[];
+    let aWins = 0, bWins = 0, aPF = 0, aPA = 0, bPF = 0, bPA = 0;
+    for (const m of recorded) {
+      const slotAIsMatchA = String(m.teamAId) === String(s?.teamAId);
+      const gA = (m.games || []).reduce((sum, g: any) => sum + (Number(g.a) || 0), 0);
+      const gB = (m.games || []).reduce((sum, g: any) => sum + (Number(g.b) || 0), 0);
+      const slotAPoints = slotAIsMatchA ? gA : gB;
+      const slotBPoints = slotAIsMatchA ? gB : gA;
+      aPF += slotAPoints; aPA += slotBPoints;
+      bPF += slotBPoints; bPA += slotAPoints;
+      if (!m.winnerTeamId || m.winnerTeamId === 'TIE') continue;
+      if (String(m.winnerTeamId) === String(s?.teamAId)) aWins++;
+      else if (String(m.winnerTeamId) === String(s?.teamBId)) bWins++;
+    }
+    let winnerTeamId: string | null = null;
+    let decidedBy: 'wins' | 'points' | null = null;
+    if (aWins !== bWins) { winnerTeamId = aWins > bWins ? s!.teamAId : s!.teamBId; decidedBy = 'wins'; }
+    else if (aPF - aPA !== bPF - bPA) { winnerTeamId = (aPF - aPA) > (bPF - bPA) ? s!.teamAId : s!.teamBId; decidedBy = 'points'; }
+    else if (aPF !== bPF) { winnerTeamId = aPF > bPF ? s!.teamAId : s!.teamBId; decidedBy = 'points'; }
+    return { recorded, aWins, bWins, aPF, aPA, bPF, bPA, winnerTeamId, decidedBy };
+  };
+
+  const sf1Decided = !!tallySlot(tour.playoffs?.semifinal1).winnerTeamId;
+  const sf2Decided = !!tallySlot(tour.playoffs?.semifinal2).winnerTeamId;
+  const finalsAlreadySet = !!(tour.playoffs?.championship?.teamAId);
+  const readyToAdvance = sf1Decided && sf2Decided && !finalsAlreadySet;
+
   return (
     <div className="space-y-4 animate-fadeIn">
       {error && <p className="text-xs text-red-600 font-semibold">{error}</p>}
+
+      {readyToAdvance && (
+        <div className="bg-court-green/10 border border-court-green/30 rounded-xl p-4 flex items-center justify-between gap-4">
+          <p className="text-xs font-bold text-court-green">Both semifinals have a winner — ready to set up the Championship and Third Place matches.</p>
+          <button onClick={advance} className="px-4 py-2 rounded-lg bg-court-green hover:bg-[#235F3A] text-xs font-bold font-mono uppercase text-white cursor-pointer shrink-0">Advance to Finals</button>
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button onClick={generate} className="px-3.5 py-2 rounded-lg bg-court-green hover:bg-[#235F3A] text-xs font-bold font-mono uppercase text-white cursor-pointer">Generate Bracket (Top 4)</button>
         {tour.playoffs && <button onClick={advance} className="px-3.5 py-2 rounded-lg bg-deep-navy hover:bg-black text-xs font-bold font-mono uppercase text-white cursor-pointer">Advance to Finals</button>}
@@ -1823,15 +2553,255 @@ const PlayoffsPanel: React.FC<{ tour: Tournament; api: any; onChanged: () => voi
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {(['semifinal1', 'semifinal2', 'championship', 'thirdPlace'] as const).map((slot) => {
             const s = tour.playoffs![slot];
+            const ready = !!(s.teamAId && s.teamBId);
+            const tally = tallySlot(s);
+            const { recorded: recordedMatches, aWins, bWins, aPF, aPA, bPF, bPA, winnerTeamId, decidedBy } = tally;
+
+            // Matches already sitting in Match History (recorded through
+            // the general flow instead of this slot's own Record Result
+            // button) that are between this slot's exact two teams and
+            // aren't linked to ANY slot yet — offered as a one-click
+            // "link this instead of re-entering it" option.
+            const linkedElsewhere = new Set(
+              (['semifinal1', 'semifinal2', 'championship', 'thirdPlace'] as const).flatMap((sl) => tour.playoffs![sl].matchIds || [])
+            );
+            const linkable = ready
+              ? Array.from(matchesById.values()).filter((m) => {
+                  if (linkedElsewhere.has(m.id)) return false;
+                  const teams = [String(m.teamAId), String(m.teamBId)].sort();
+                  const slotTeams = [String(s.teamAId), String(s.teamBId)].sort();
+                  return teams[0] === slotTeams[0] && teams[1] === slotTeams[1];
+                })
+              : [];
+
             return (
-              <div key={slot} className="bg-white border border-light-border rounded-xl p-4 space-y-1">
-                <span className="text-[10px] font-mono uppercase text-slate-gray font-bold">{slot.replace(/([A-Z0-9])/g, ' $1')}</span>
-                <p className="text-sm font-bold text-charcoal">{teamName(s.teamAId)} vs {teamName(s.teamBId)}</p>
+              <div key={slot} className="bg-white border border-light-border rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono uppercase text-slate-gray font-bold">{slot.replace(/([A-Z0-9])/g, ' $1')}</span>
+                  {recordedMatches.length > 0 && !!winnerTeamId && (
+                    <span className="text-[9px] font-bold font-mono uppercase text-court-green bg-court-green/10 border border-court-green/20 px-2 py-0.5 rounded">Decided</span>
+                  )}
+                </div>
+                <p className="text-sm font-bold text-charcoal">{ready ? `${teamName(s.teamAId)} vs ${teamName(s.teamBId)}` : 'Waiting on earlier round'}</p>
+
+                {recordedMatches.length > 0 && (
+                  <div className="space-y-1">
+                    {!winnerTeamId ? (
+                      <p className="text-[10px] font-mono font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                        Dead even on wins and points {aWins}-{bWins} — record one more match to settle it
+                      </p>
+                    ) : decidedBy === 'wins' ? (
+                      <p className="text-[10px] font-mono font-bold text-court-green">
+                        {teamName(winnerTeamId)} leads {Math.max(aWins, bWins)}-{Math.min(aWins, bWins)}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] font-mono font-bold text-court-green">
+                        {teamName(winnerTeamId)} ahead on points ({aWins}-{bWins} on wins, {winnerTeamId === s.teamAId ? `${aPF - aPA >= 0 ? '+' : ''}${aPF - aPA}` : `${bPF - bPA >= 0 ? '+' : ''}${bPF - bPA}`} pt diff)
+                      </p>
+                    )}
+                    <div className="space-y-1">
+                      {recordedMatches.map((m) => {
+                        const playersLabel = (m.teamAPlayers?.length || m.teamBPlayers?.length)
+                          ? `${(m.teamAPlayers || []).map((p) => p.name).join(' & ') || teamName(s.teamAId)} vs ${(m.teamBPlayers || []).map((p) => p.name).join(' & ') || teamName(s.teamBId)}`
+                          : null;
+                        return (
+                          <div key={m.id} className="flex items-center justify-between gap-2 text-[10px] bg-off-white border border-light-border px-2.5 py-1.5 rounded-lg">
+                            <div className="min-w-0">
+                              {playersLabel && <p className="text-charcoal font-semibold truncate">{playersLabel}</p>}
+                              <p className="text-slate-gray font-mono">{m.date}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-mono font-bold text-charcoal">{m.games?.[0] ? `${m.games[0].a}-${m.games[0].b}` : '—'}</span>
+                              <button
+                                onClick={async () => { if (confirm('Remove this match from the bracket count? The match itself stays in Match History.')) { await api.unlinkPlayoffMatch(tour.id, slot, m.id); onChanged(); } }}
+                                title="Remove from this round"
+                                className="text-slate-gray hover:text-red-600 cursor-pointer"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {linkable.length > 0 && (
+                  <details className="bg-off-white border border-light-border rounded-lg p-2.5">
+                    <summary className="text-[9px] font-mono font-bold text-slate-gray uppercase cursor-pointer select-none">
+                      {linkable.length} unlinked match{linkable.length > 1 ? 'es' : ''} already in Match History for this matchup
+                    </summary>
+                    <div className="space-y-1.5 mt-2">
+                      {linkable.map((m) => {
+                        const playersLabel = (m.teamAPlayers?.length || m.teamBPlayers?.length)
+                          ? `${(m.teamAPlayers || []).map((p) => p.name).join(' & ') || teamName(s.teamAId)} vs ${(m.teamBPlayers || []).map((p) => p.name).join(' & ') || teamName(s.teamBId)}`
+                          : null;
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={async () => { await api.linkExistingPlayoffMatch(tour.id, slot, m.id); onChanged(); }}
+                            className="w-full flex items-center justify-between text-[10px] bg-white rounded-lg px-2 py-1.5 cursor-pointer hover:bg-off-white transition-all"
+                          >
+                            <span className="text-left min-w-0">
+                              {playersLabel && <span className="text-charcoal font-semibold block truncate">{playersLabel}</span>}
+                              <span className="text-slate-gray block">{m.date} &middot; {m.games?.[0] ? `${m.games[0].a}-${m.games[0].b}` : '—'}</span>
+                            </span>
+                            <span className="font-bold text-court-green shrink-0 ml-2">Link</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
+
+                {ready && (
+                  <button
+                    onClick={() => setRecordingSlot(slot)}
+                    className="text-[10px] font-bold font-mono uppercase text-court-green hover:underline cursor-pointer"
+                  >
+                    {recordedMatches.length > 0 ? (!winnerTeamId ? 'Record Tiebreaker Match' : 'Record Another Match') : 'Record Result'}
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       )}
+
+      {recordingSlot && tour.playoffs && (
+        <RecordPlayoffMatchModal
+          tour={tour}
+          slot={recordingSlot}
+          slotData={tour.playoffs[recordingSlot]}
+          api={api}
+          onClose={() => setRecordingSlot(null)}
+          onRecorded={() => { setRecordingSlot(null); onChanged(); }}
+        />
+      )}
+    </div>
+  );
+};
+
+const RecordPlayoffMatchModal: React.FC<{
+  tour: Tournament;
+  slot: 'semifinal1' | 'semifinal2' | 'championship' | 'thirdPlace';
+  slotData: { teamAId: string; teamBId: string; matchId: string };
+  api: any;
+  onClose: () => void;
+  onRecorded: () => void;
+}> = ({ tour, slot, slotData, api, onClose, onRecorded }) => {
+  const teamA = (tour.teams || []).find((t) => t.id === slotData.teamAId);
+  const teamB = (tour.teams || []).find((t) => t.id === slotData.teamBId);
+  const gameType = tour.format === 'mlp_singles' ? 'singles' : 'doubles';
+  const requiredPerSide = gameType === 'singles' ? 1 : 2;
+  const playerKey = (p: RosterPlayer) => p.email || p.name;
+
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [court, setCourt] = useState('Court 1');
+  const [teamAPlayers, setTeamAPlayers] = useState<RosterPlayer[]>([]);
+  const [teamBPlayers, setTeamBPlayers] = useState<RosterPlayer[]>([]);
+  const [scoreA, setScoreA] = useState('');
+  const [scoreB, setScoreB] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const togglePlayer = (side: 'A' | 'B', player: RosterPlayer) => {
+    const key = playerKey(player);
+    if (side === 'A') {
+      setTeamAPlayers((prev) => (prev.some((p) => playerKey(p) === key) ? prev.filter((p) => playerKey(p) !== key) : prev.length < requiredPerSide ? [...prev, player] : prev));
+    } else {
+      setTeamBPlayers((prev) => (prev.some((p) => playerKey(p) === key) ? prev.filter((p) => playerKey(p) !== key) : prev.length < requiredPerSide ? [...prev, player] : prev));
+    }
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const a = Number(scoreA);
+    const b = Number(scoreB);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0) { setError('Enter a valid score for both teams.'); return; }
+    if (a === b) { setError('Playoff matches need a winner — scores cannot tie.'); return; }
+    if (teamAPlayers.length > 0 && teamAPlayers.length !== requiredPerSide) { setError(`Select exactly ${requiredPerSide} player(s) for ${teamA?.name}, or none.`); return; }
+    if (teamBPlayers.length > 0 && teamBPlayers.length !== requiredPerSide) { setError(`Select exactly ${requiredPerSide} player(s) for ${teamB?.name}, or none.`); return; }
+
+    setSubmitting(true);
+    try {
+      await api.recordPlayoffMatch(tour.id, slot, {
+        date,
+        court,
+        gameType,
+        gamesPlayed: 1,
+        games: [{ a, b }],
+        teamAPlayers,
+        teamBPlayers,
+        winnerTeamId: a > b ? slotData.teamAId : slotData.teamBId,
+      });
+      onRecorded();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to record result.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <form onSubmit={submit} className="bg-white border border-light-border rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display font-bold text-lg text-charcoal">{slot.replace(/([A-Z0-9])/g, ' $1')}</h3>
+          <button type="button" onClick={onClose} className="text-slate-gray hover:text-charcoal cursor-pointer">&times;</button>
+        </div>
+        <p className="text-xs text-slate-gray font-mono">{teamA?.name || 'TBD'} vs {teamB?.name || 'TBD'} &middot; {gameType}</p>
+        {error && <p className="text-xs font-semibold text-red-600 bg-red-50 border border-red-100 p-3 rounded-xl">{error}</p>}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full text-xs bg-off-white border border-light-border rounded-lg px-3 py-2.5" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[9px] font-mono uppercase text-slate-gray font-bold">Court</label>
+            <input value={court} onChange={(e) => setCourt(e.target.value)} className="w-full text-xs bg-off-white border border-light-border rounded-lg px-3 py-2.5" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          {/* Team A */}
+          <div className="space-y-2">
+            <span className="text-xs font-bold text-charcoal block">{teamA?.name || 'Team A'}</span>
+            <span className="text-[9px] font-mono text-slate-gray uppercase block">Select {requiredPerSide} player{requiredPerSide > 1 ? 's' : ''} (optional)</span>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {(teamA?.players || []).map((p) => (
+                <label key={playerKey(p)} className="flex items-center gap-2 text-xs bg-off-white rounded-lg px-2 py-1.5 cursor-pointer">
+                  <input type="checkbox" checked={teamAPlayers.some((x) => playerKey(x) === playerKey(p))} onChange={() => togglePlayer('A', p)} />
+                  <span>{p.name}</span>
+                </label>
+              ))}
+            </div>
+            <input type="number" min="0" value={scoreA} onChange={(e) => setScoreA(e.target.value)} placeholder="Score" className="w-full text-lg font-bold text-center bg-off-white border border-light-border rounded-lg px-3 py-2.5 mt-2" />
+          </div>
+          {/* Team B */}
+          <div className="space-y-2">
+            <span className="text-xs font-bold text-charcoal block">{teamB?.name || 'Team B'}</span>
+            <span className="text-[9px] font-mono text-slate-gray uppercase block">Select {requiredPerSide} player{requiredPerSide > 1 ? 's' : ''} (optional)</span>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {(teamB?.players || []).map((p) => (
+                <label key={playerKey(p)} className="flex items-center gap-2 text-xs bg-off-white rounded-lg px-2 py-1.5 cursor-pointer">
+                  <input type="checkbox" checked={teamBPlayers.some((x) => playerKey(x) === playerKey(p))} onChange={() => togglePlayer('B', p)} />
+                  <span>{p.name}</span>
+                </label>
+              ))}
+            </div>
+            <input type="number" min="0" value={scoreB} onChange={(e) => setScoreB(e.target.value)} placeholder="Score" className="w-full text-lg font-bold text-center bg-off-white border border-light-border rounded-lg px-3 py-2.5 mt-2" />
+          </div>
+        </div>
+
+        <button type="submit" disabled={submitting} className="w-full py-2.5 rounded-xl bg-court-green hover:bg-[#235F3A] text-white text-xs font-bold font-mono uppercase transition-all cursor-pointer disabled:opacity-60">
+          {submitting ? 'Saving...' : 'Save Result'}
+        </button>
+      </form>
     </div>
   );
 };

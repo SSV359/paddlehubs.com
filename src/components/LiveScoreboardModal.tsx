@@ -57,12 +57,19 @@ export const LiveScoreboardModal: React.FC<{
     }
   };
 
+  const [actionPending, setActionPending] = useState(false);
+
   const act = async (action: string) => {
+    if (actionPending) return; // a tap is already in flight — ignore a second one landing before it resolves
+    setActionPending(true);
+    setError(null);
     try {
       const r = await api.updateLiveMatch(tour.id, fixture.fixtureId, action);
       setLive(r);
     } catch (e: any) {
       setError(e?.message || 'Could not update score.');
+    } finally {
+      setActionPending(false);
     }
   };
 
@@ -154,8 +161,8 @@ export const LiveScoreboardModal: React.FC<{
                   <p className="text-5xl font-display font-black">{live.liveA}</p>
                   {!readOnly && (
                     <div className="flex justify-center gap-1.5">
-                      <button onClick={() => act('undo_a')} className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer"><Minus className="w-4 h-4" /></button>
-                      <button onClick={() => act('point_a')} className="w-9 h-9 rounded-lg bg-court-green hover:bg-[#235F3A] flex items-center justify-center cursor-pointer"><Plus className="w-4 h-4" /></button>
+                      <button onClick={() => act('undo_a')} disabled={actionPending} className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"><Minus className="w-4 h-4" /></button>
+                      <button onClick={() => act('point_a')} disabled={actionPending} className="w-9 h-9 rounded-lg bg-court-green hover:bg-[#235F3A] flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"><Plus className="w-4 h-4" /></button>
                     </div>
                   )}
                 </div>
@@ -167,15 +174,15 @@ export const LiveScoreboardModal: React.FC<{
                   <p className="text-5xl font-display font-black">{live.liveB}</p>
                   {!readOnly && (
                     <div className="flex justify-center gap-1.5">
-                      <button onClick={() => act('undo_b')} className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer"><Minus className="w-4 h-4" /></button>
-                      <button onClick={() => act('point_b')} className="w-9 h-9 rounded-lg bg-court-green hover:bg-[#235F3A] flex items-center justify-center cursor-pointer"><Plus className="w-4 h-4" /></button>
+                      <button onClick={() => act('undo_b')} disabled={actionPending} className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"><Minus className="w-4 h-4" /></button>
+                      <button onClick={() => act('point_b')} disabled={actionPending} className="w-9 h-9 rounded-lg bg-court-green hover:bg-[#235F3A] flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"><Plus className="w-4 h-4" /></button>
                     </div>
                   )}
                 </div>
               </div>
 
               {!readOnly && (
-                <button onClick={() => act('complete_game')} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/15 text-xs font-bold font-mono uppercase text-slate-300 hover:text-white hover:border-white/30 transition-all cursor-pointer">
+                <button onClick={() => act('complete_game')} disabled={actionPending} className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/15 text-xs font-bold font-mono uppercase text-slate-300 hover:text-white hover:border-white/30 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
                   <Undo2 className="w-4 h-4 rotate-180" /> Complete This Game
                 </button>
               )}

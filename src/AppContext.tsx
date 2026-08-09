@@ -10,7 +10,7 @@
  * PlayerRankingRow, ClubMatch, Booking, Auction, Playoffs) — this file only
  * establishes the real data layer and exposes everything the real API offers.
  */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import * as authApi from './auth';
 import * as api from './api';
 import type {
@@ -44,6 +44,7 @@ export type ActiveView =
   | 'need-a-sub'
   | 'live-matches'
   | 'pairing-wheel'
+  | 'club-news'
   | 'tournaments'
   | 'schedule'
   | 'profile'
@@ -131,6 +132,12 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     teamId: string | null;
     playerId: string | null;
   }[]>([]);
+  // Guards the URL-sync effect below from firing before the initial
+  // restore-from-URL step has actually run — without this, the write
+  // effect fires on first mount with the default 'dashboard' state and
+  // clobbers the URL before the async restore logic gets a chance to
+  // read the original one.
+  const urlRestoredRef = useRef(false);
 
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [clubMatches, setClubMatches] = useState<ClubMatch[]>([]);
@@ -212,7 +219,25 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         setActiveTournamentId(checkinId);
         setCurrentView('tournament-hub');
+      } else {
+        // A page refresh loses all in-memory React state, and without
+        // this, every refresh silently dumped the person back on
+        // Dashboard no matter what they were looking at. The URL is the
+        // only thing that survives a refresh, so it's the source of
+        // truth for "where was I" on initial load.
+        const params = new URLSearchParams(window.location.search);
+        const view = params.get('view') as ActiveView | null;
+        if (view) {
+          setCurrentView(view);
+          const tid = params.get('tid');
+          const teamid = params.get('teamid');
+          const pid = params.get('pid');
+          if (view === 'team-hub' && teamid) setActiveTeamId(teamid);
+          else if (view === 'profile' && pid) setActivePlayerId(pid);
+          else if (tid) setActiveTournamentId(tid);
+        }
       }
+      urlRestoredRef.current = true;
     })();
   }, [refreshCurrentUser]);
 
@@ -357,6 +382,26 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return h.slice(0, -1);
     });
   };
+
+  // Keeps the URL reflecting wherever the person currently is, so a
+  // refresh at ANY point (not just the first load) has something to
+  // restore from — using replaceState rather than pushState since the
+  // app already has its own in-app back-navigation stack (history state
+  // above); this isn't meant to also drive the browser's own back button.
+  useEffect(() => {
+    if (!urlRestoredRef.current) return;
+    const params = new URLSearchParams();
+    params.set('view', currentView);
+    if (currentView === 'team-hub' && activeTeamId) params.set('teamid', activeTeamId);
+    else if (currentView === 'profile' && activePlayerId) params.set('pid', activePlayerId);
+    else if (activeTournamentId) params.set('tid', activeTournamentId);
+    const query = params.toString();
+    const newUrl = `${window.location.pathname}${query ? `?${query}` : ''}`;
+    if (newUrl !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [currentView, activeTournamentId, activeTeamId, activePlayerId]);
+
 
   return (
     <AppContext.Provider

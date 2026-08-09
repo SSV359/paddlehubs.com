@@ -95,6 +95,15 @@ export const DashboardView: React.FC = () => {
   // the Tournament Details screen.
   const recentResults = (isGuest ? [] : clubMatches).slice(0, 3);
 
+  // Recently crowned champions — any tournament with at least a 1st
+  // place set, most recently updated first. This is the "news" surface
+  // for the Champions feature: once an admin sets a winner photo
+  // anywhere in the club, it shows up here automatically.
+  const recentChampions = tournaments
+    .filter((t) => t.winners?.first?.teamId)
+    .sort((a, b) => (b.winnersUpdatedAt || '').localeCompare(a.winnersUpdatedAt || ''))
+    .slice(0, 3);
+
   // "Your Next Matches" now shows the player's own upcoming court
   // bookings — the closest real equivalent to a scheduled fixture.
   const upcomingBookings = (isGuest ? [] : clubBookings)
@@ -157,6 +166,39 @@ export const DashboardView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Recently Crowned Champions — news feed sourced from the
+          Champions feature on each tournament's Overview tab */}
+      {recentChampions.length > 0 && (
+        <div className="space-y-3" id="champions-news-feed">
+          <div className="flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-soft-gold" />
+            <h2 className="text-xs font-display font-bold text-charcoal uppercase tracking-wide">Recently Crowned</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {recentChampions.map((t) => {
+              const first = t.winners!.first!;
+              const teamName = (t.teams || []).find((tm) => tm.id === first.teamId)?.name || 'Champions';
+              return (
+                <div key={t.id} className="bg-white border border-light-border rounded-2xl p-4 shadow-sm flex items-center gap-3">
+                  {first.photoDataUrl ? (
+                    <img src={first.photoDataUrl} alt={teamName} className="w-14 h-14 rounded-xl object-cover border border-light-border shrink-0" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-xl bg-soft-gold/10 border border-soft-gold/20 flex items-center justify-center shrink-0">
+                      <Trophy className="w-6 h-6 text-soft-gold" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[9px] font-mono font-bold text-soft-gold uppercase truncate">{t.name}</p>
+                    <p className="text-sm font-bold text-charcoal truncate">🏆 {teamName}</p>
+                    <p className="text-[10px] text-slate-gray">Champions</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="stats-summary-grid">

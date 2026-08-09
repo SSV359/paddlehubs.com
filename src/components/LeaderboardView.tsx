@@ -207,6 +207,7 @@ export const LeaderboardView: React.FC = () => {
                   <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase w-16 text-center">Rank</th>
                   <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase">Player Name</th>
                   <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase text-center w-36">DUPR Rating</th>
+                  <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase text-center w-36">Club Rating</th>
                   <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase text-center w-24">Wins</th>
                   <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase text-center w-24">Losses</th>
                   <th className="py-4 px-6 text-[10px] font-semibold font-display tracking-widest text-slate-gray uppercase text-center w-28">Win %</th>
@@ -215,7 +216,7 @@ export const LeaderboardView: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {sortedPlayers.length === 0 ? (
-                  <tr><td colSpan={7} className="py-10 text-center text-xs text-slate-gray font-mono">No ranked players yet.</td></tr>
+                  <tr><td colSpan={8} className="py-10 text-center text-xs text-slate-gray font-mono">No ranked players yet.</td></tr>
                 ) : sortedPlayers.map((p) => {
                   const rank = p.rank;
                   return (
@@ -265,6 +266,13 @@ export const LeaderboardView: React.FC = () => {
                         <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-court-green/10 text-court-green border border-court-green/20 font-mono font-extrabold text-xs">
                           <Sparkles className="w-3 h-3 text-soft-gold" />
                           {p.duprRating != null ? p.duprRating.toFixed(2) : '—'}
+                        </span>
+                      </td>
+
+                      {/* Club Rating — computed from match results, distinct from self-reported DUPR */}
+                      <td className="py-4 px-6 text-center">
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-soft-gold/10 text-soft-gold border border-soft-gold/20 font-mono font-extrabold text-xs">
+                          {p.clubRating != null ? p.clubRating.toFixed(2) : '—'}
                         </span>
                       </td>
 

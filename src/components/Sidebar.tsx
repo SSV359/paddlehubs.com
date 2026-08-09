@@ -8,6 +8,7 @@ import { useAppState, ActiveView } from '../AppContext';
 import { PaddleHubsLogo } from './PaddleHubsLogo';
 import {
   LayoutDashboard,
+  Newspaper,
   Trophy,
   Radio,
   Award,
@@ -43,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen, onLogout })
 
   const menuItems = [
     { id: 'dashboard' as ActiveView, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'club-news' as ActiveView, label: 'Club News', icon: Newspaper },
     { id: 'live-matches' as ActiveView, label: 'Live Matches', icon: Radio },
     { id: 'pairing-wheel' as ActiveView, label: 'Pairing Wheel', icon: Sparkles },
     { id: 'leaderboard' as ActiveView, label: 'Leaderboard', icon: Trophy },

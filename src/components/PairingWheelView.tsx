@@ -17,8 +17,10 @@ export const PairingWheelView: React.FC = () => {
   const [sourceTournamentId, setSourceTournamentId] = useState('');
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [pending, setPending] = useState<string | null>(null); // first player picked for the current pair, awaiting a second
   const [pairs, setPairs] = useState<[string, string][]>([]);
+  const [justWon, setJustWon] = useState<string | null>(null); // name of whoever the last spin landed on — highlighted directly, not just implied by pointer angle
   const [byePlayer, setByePlayer] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -53,7 +55,8 @@ export const PairingWheelView: React.FC = () => {
   };
 
   const spin = () => {
-    if (spinning || remaining.length === 0) return;
+    if (spinning || resetting || remaining.length === 0) return;
+    setJustWon(null);
 
     // Odd one out with nobody left to pair against — auto-assign as bye
     // rather than spinning a wheel with only one segment on it.
@@ -63,21 +66,29 @@ export const PairingWheelView: React.FC = () => {
       return;
     }
 
-    setSpinning(true);
     const n = remaining.length;
-    const segmentAngle = 360 / n;
     const winnerIdx = Math.floor(Math.random() * n);
-    const targetAngle = winnerIdx * segmentAngle + segmentAngle / 2;
-    const currentMod = rotation % 360;
-    const desiredMod = (360 - targetAngle + 360) % 360;
-    let delta = desiredMod - currentMod;
-    if (delta < 0) delta += 360;
-    delta += 5 * 360; // extra full spins for effect
+    // No pointer to land on anymore — the winner banner is the sole,
+    // authoritative announcement of who was picked, so the spin amount
+    // is purely for visual flair now, not tied to any target angle.
+    const finalRotation = 5 * 360 + Math.random() * 360;
 
-    setRotation((r) => r + delta);
+    // Every spin starts from a clean, known baseline (0) rather than
+    // continuing from wherever it last stopped, so the animation always
+    // has a full, consistent spin to work with.
+    setResetting(true);
+    setRotation(0);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setResetting(false);
+        setSpinning(true);
+        setRotation(finalRotation);
+      });
+    });
 
     setTimeout(() => {
       const winner = remaining[winnerIdx];
+      setJustWon(winner);
       setPool((prev) => prev.filter((_, i) => i !== winnerIdx));
       if (pending) {
         setPairs((prev) => [...prev, [pending, winner]]);
@@ -198,14 +209,12 @@ export const PairingWheelView: React.FC = () => {
           ) : (
             <>
               <div className="relative w-80 h-80 mb-6">
-                {/* Pointer */}
-                <div className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 w-0 h-0 border-l-[14px] border-l-transparent border-r-[14px] border-r-transparent border-t-[22px] border-t-deep-navy" />
                 <div
                   className="w-full h-full rounded-full border-4 border-deep-navy shadow-xl relative overflow-hidden"
                   style={{
                     background: `conic-gradient(${remaining.map((_, i) => `${WHEEL_COLORS[i % WHEEL_COLORS.length]} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`).join(', ')})`,
                     transform: `rotate(${rotation}deg)`,
-                    transition: spinning ? 'transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99)' : 'none',
+                    transition: resetting ? 'none' : spinning ? 'transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99)' : 'none',
                   }}
                 >
                   {remaining.map((name, i) => {
@@ -234,9 +243,15 @@ export const PairingWheelView: React.FC = () => {
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-deep-navy border-4 border-white shadow-lg" />
               </div>
 
+              {justWon && !spinning && (
+                <div className="mb-4 px-5 py-2.5 rounded-xl bg-court-green/10 border border-court-green/30 text-court-green font-bold text-sm font-mono uppercase animate-fadeIn">
+                  🎉 {justWon} selected!
+                </div>
+              )}
+
               <button
                 onClick={spin}
-                disabled={spinning}
+                disabled={spinning || resetting}
                 className="px-8 py-3 rounded-xl bg-court-green hover:bg-[#235F3A] text-white font-bold text-sm font-mono uppercase cursor-pointer shadow-md transition-all disabled:opacity-60"
               >
                 {spinning ? 'Spinning...' : pending ? `Spin for ${pending}'s Partner` : 'Spin the Wheel'}

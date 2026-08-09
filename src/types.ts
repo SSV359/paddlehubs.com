@@ -61,6 +61,7 @@ export interface Booking {
 export interface RosterPlayer {
   name: string;
   email: string;
+  level?: 1 | 2 | 3 | 4;
 }
 
 export interface TournamentTeam {
@@ -131,7 +132,7 @@ export interface Auction {
 export interface PlayoffSlot {
   teamAId: string;
   teamBId: string;
-  matchId: string;
+  matchIds: string[];
 }
 
 export interface Playoffs {
@@ -204,11 +205,18 @@ export interface TournamentSchedule {
   updatedAt: string | null;
 }
 
+export interface TournamentWinnerEntry {
+  teamId: string;
+  photoDataUrl: string;
+}
+
 export interface Tournament {
   id: string;
   type: 'TOURNAMENT';
   name: string;
   checkedIn?: Record<string, string>;
+  winners?: { first?: TournamentWinnerEntry; second?: TournamentWinnerEntry; third?: TournamentWinnerEntry };
+  winnersUpdatedAt?: string;
   startDate: string;
   endDate: string;
   registrationStartDate: string;
@@ -401,6 +409,7 @@ export interface PlayerRankingRow {
   streak: number;
   duprId?: string;
   duprRating?: number | null;
+  clubRating?: number | null;
   online?: boolean;
   avatarDataUrl?: string;
   avatarColor?: string;

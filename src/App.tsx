@@ -20,6 +20,7 @@ import { PlayerDirectoryView } from './components/PlayerDirectoryView';
 import { NeedASubView } from './components/NeedASubView';
 import { LiveMatchesView } from './components/LiveMatchesView';
 import { PairingWheelView } from './components/PairingWheelView';
+import { ClubNewsView } from './components/ClubNewsView';
 import { NotificationBell } from './components/NotificationBell';
 import { TournamentsView } from './components/TournamentsView';
 import { TournamentDetailsView } from './components/TournamentDetailsView';
@@ -81,6 +82,8 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         return 'Live Matches';
       case 'pairing-wheel':
         return 'Pairing Wheel';
+      case 'club-news':
+        return 'Club News';
       case 'tournaments':
         return 'Brackets Directory';
       case 'tournament-hub':
@@ -111,7 +114,7 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   };
 
   const isViewRestricted = (view: string) => {
-    const publicViews = ['dashboard', 'leaderboard', 'tournaments', 'tournament-hub', 'schedule', 'register-bracket', 'player-directory', 'live-matches'];
+    const publicViews = ['dashboard', 'leaderboard', 'tournaments', 'tournament-hub', 'schedule', 'register-bracket', 'player-directory', 'live-matches', 'club-news'];
     if (view === 'profile' && activePlayerId) {
       return false;
     }
@@ -203,6 +206,7 @@ const MainLayout: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               {currentView === 'need-a-sub' && <NeedASubView />}
               {currentView === 'live-matches' && <LiveMatchesView />}
               {currentView === 'pairing-wheel' && <PairingWheelView />}
+              {currentView === 'club-news' && <ClubNewsView />}
               {currentView === 'tournaments' && <TournamentsView />}
               {currentView === 'tournament-hub' && <TournamentDetailsView />}
               {currentView === 'schedule' && <ScheduleView />}
